@@ -21,7 +21,7 @@ process.env.FFMPEG_PATH = ffmpeg.path;
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "http://localhost:5173", methods: ["GET", "POST"] }
+  cors: { origin: "https://daveapp-backend.onrender.com", methods: ["GET", "POST"] }
 });
 
 // Security Middlewares (DDoS Protection)
