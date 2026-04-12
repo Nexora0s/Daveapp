@@ -30,8 +30,6 @@ const BANNER_PATH = path.join(__dirname, 'assets', 'stream_banner.png');
 const CAFE_STATIC_PATH = path.join(__dirname, 'assets', 'cafe_static.png');
 
 const activeSessions = new Map();
-const staffStats = new Map();
-let staffLogs = [];
 
 // ====================== SYNC FUNCTIONS ======================
 const syncSystemAccounts = () => {
@@ -66,6 +64,7 @@ const startStream = async (session, guildId, channelId) => {
     try {
         await session.streamer.joinVoice(guildId, channelId);
         
+        // Kamera ve Yayın Sinyali (ZORUNLU)
         session.client.ws.send({
             op: 4,
             d: {
@@ -86,7 +85,7 @@ const startStream = async (session, guildId, channelId) => {
         session.isCamera = true;
         syncSystemAccounts();
     } catch (e) {
-        console.error('[STREAM ERROR]', e.message);
+        console.error('[YAYIN HATASI]', e.message);
     }
 };
 
@@ -112,7 +111,7 @@ const connectToken = async (data) => {
       };
       activeSessions.set(client.user.id, session);
 
-      // İlk Bağlantı
+      // İLK BAĞLANTI (OTO YAYIN/KAMERA)
       try {
           if (media.camera || media.stream) {
               await startStream(session, serverId, voiceId);
@@ -120,27 +119,28 @@ const connectToken = async (data) => {
               const guild = client.guilds.cache.get(serverId);
               joinVoiceChannel({ channelId: voiceId, guildId: serverId, adapterCreator: guild.voiceAdapterCreator, selfMute: !media.mic, selfDeaf: !media.sound });
           }
-      } catch (e) { console.error('[INIT VOICE ERROR]', e.message); }
+      } catch (e) { console.error('[SES HATASI]', e.message); }
 
-      // ANLIK TAKIP VE OTO-RECONNECT (BOZMADAN)
+      // YILDIRIM HIZINDA RECONNECT (2 SANIYE)
       client.on('voiceStateUpdate', (oldState, newState) => {
           if (newState.member.id === client.user.id) {
-              // Sesten atılınca veya çıkınca otomatik geri bağlan
+              // Sesten atıldığında veya kanal koptuğunda
               if (!newState.channelId) {
-                  console.log(`[RECONNECT] ${client.user.username} sesten atıldı, 5 saniye içinde geri bağlanılıyor...`);
+                  console.log(`[OTO-RECONNECT] ${client.user.username} sesten atıldı, 2 saniye içinde geri sızılıyor...`);
                   setTimeout(async () => {
                       if (activeSessions.has(client.user.id)) {
                           const s = activeSessions.get(client.user.id);
-                          if (s.config.media.camera || s.config.media.stream) {
-                              await startStream(s, s.config.serverId, s.config.voiceId);
-                          } else {
-                              const g = client.guilds.cache.get(s.config.serverId);
-                              if (g) joinVoiceChannel({ channelId: s.config.voiceId, guildId: s.config.serverId, adapterCreator: g.voiceAdapterCreator, selfMute: !s.config.media.mic, selfDeaf: !s.config.media.sound });
-                          }
+                          try {
+                              if (s.config.media.camera || s.config.media.stream) {
+                                  await startStream(s, s.config.serverId, s.config.voiceId);
+                              } else {
+                                  const g = client.guilds.cache.get(s.config.serverId);
+                                  if (g) joinVoiceChannel({ channelId: s.config.voiceId, guildId: s.config.serverId, adapterCreator: g.voiceAdapterCreator, selfMute: !s.config.media.mic, selfDeaf: !s.config.media.sound });
+                              }
+                          } catch (err) { console.error('[RECONNECT HATASI]', err.message); }
                       }
-                  }, 5000);
+                  }, 2000);
               }
-              // Durumu her zaman UI'a yansıt
               syncSystemAccounts();
           }
       });
@@ -153,17 +153,16 @@ const connectToken = async (data) => {
   });
 };
 
-// ====================== API ROUTES ======================
+// ====================== ROUTES ======================
 app.post('/api/connect', async (req, res) => {
   const { tokens, serverId, voiceId, presence, media, proxy, activityText } = req.body;
   const tList = Array.isArray(tokens) ? tokens : [req.body.token];
-  
   for (const token of tList) {
     if (!token) continue;
     connectToken({ token: token.trim(), serverId, voiceId, presence, media, proxy, activityText }).catch(e => console.error(e.message));
     await new Promise(r => setTimeout(r, 1500));
   }
-  res.json({ message: "Bağlantı işlemi arka planda başlatıldı." });
+  res.json({ message: "Sistem aktif edildi." });
 });
 
 app.post('/api/logout-all', (req, res) => {
@@ -175,4 +174,4 @@ app.post('/api/logout-all', (req, res) => {
 
 io.on('connection', (s) => { syncSystemAccounts(); });
 
-server.listen(PORT, () => console.log(`🚀 Dave.903 Her Şey Dahil Sunucu: ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Dave.903 Yıldırım Hızında Sunucu: ${PORT}`));
