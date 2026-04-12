@@ -23,7 +23,6 @@ function App() {
   const [activityText, setActivityText] = useState('');
   const [proxy, setProxy] = useState('');
   const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [media, setMedia] = useState({ mic: false, sound: true, camera: true, stream: true });
 
   const getTokenList = () => {
@@ -40,7 +39,6 @@ function App() {
     }
 
     setLoading(true);
-    setProgress({ current: 0, total: currentTokens.length });
     
     try {
       const response = await fetch(`${BACKEND_URL}/api/connect`, {
@@ -54,27 +52,20 @@ function App() {
 
       const data = await response.json();
       if (response.ok) {
-        for (let i = 1; i <= currentTokens.length; i++) {
-          setTimeout(() => setProgress(prev => ({ ...prev, current: i })), i * 2000);
-        }
-        setTimeout(() => {
-          alert('✅ İşlem Tamamlandı: ' + data.message);
-          setLoading(false);
-          setProgress({ current: 0, total: 0 });
-          // Clear inputs after success
-          setToken('');
-          setTokens('');
-          setActivityText('');
-          setProxy('');
-          setServerId('');
-          setVoiceId('');
-        }, currentTokens.length * 2000 + 500);
+        alert('✅ İşlem Tamamlandı: ' + data.message);
+        setToken('');
+        setTokens('');
+        setActivityText('');
+        setProxy('');
+        setServerId('');
+        setVoiceId('');
       } else {
         alert('❌ Hata: ' + data.error);
-        setLoading(false);
       }
     } catch (err) {
-      alert('❌ Sunucuya bağlanılamadı. Backend çalışıyor mu?');
+      console.error('Backend connection error:', err);
+      alert(`❌ Backend'e bağlanılamadı!\n\nBackend URL: ${BACKEND_URL}\n\nVercel'de VITE_BACKEND_URL environment variable'ını ekledin mi?`);
+    } finally {
       setLoading(false);
     }
   };
@@ -106,7 +97,7 @@ function App() {
               activityText={activityText} setActivityText={setActivityText}
               proxy={proxy} setProxy={setProxy}
               media={media} setMedia={setMedia}
-              loading={loading} progress={progress}
+              loading={loading}
               handleConnect={handleConnect}
             />
           ) : (
