@@ -14,61 +14,29 @@ const { joinVoiceChannel, VoiceConnectionStatus } = require('@discordjs/voice');
 // ====================== CONFIG & ENVIRONMENT ======================
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
-
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['*']; 
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) : ['*']; 
 
 const STATS_FILE = path.join(__dirname, 'data', 'staff_stats.json');
-
-// FFmpeg Setup
 process.env.FFMPEG_PATH = ffmpeg.path;
 
 // ====================== INITIALIZATION ======================
 const app = express();
 const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: ALLOWED_ORIGINS, methods: ["GET", "POST"], credentials: true } });
 
-const io = new Server(server, {
-  cors: {
-    origin: ALLOWED_ORIGINS,
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
-
-// ====================== SECURITY MIDDLEWARES ======================
-app.use(helmet({ contentSecurityPolicy: NODE_ENV === 'production' ? true : false }));
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
-
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 150,
-  message: { error: 'Çok fazla istek gönderildi. Lütfen 15 dakika sonra tekrar deneyin.' }
-});
-
-app.use('/api/', apiLimiter);
-
-// Health Check
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', uptime: process.uptime(), activeSessions: activeSessions.size });
-});
 
 // Paths
 const BANNER_PATH = path.join(__dirname, 'assets', 'stream_banner.png');
 const CAFE_STATIC_PATH = path.join(__dirname, 'assets', 'cafe_static.png');
 
-// In-Memory Storage
 const activeSessions = new Map();
 const staffStats = new Map();
-const monitoredGuilds = new Map();
-let staffLogs = [];
 
 // ====================== UTILITIES ======================
-const ensureDataDir = () => {
-    const dataDir = path.join(__dirname, 'data');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-};
+const ensureDataDir = () => { if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true }); };
 
 const loadStats = () => {
     try {
@@ -77,18 +45,9 @@ const loadStats = () => {
             const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
             Object.entries(data).forEach(([id, stats]) => staffStats.set(id, stats));
         }
-    } catch (e) { console.error('[STATS] Yükleme hatası:', e.message); }
+    } catch (e) { console.error('[STATS] Hata:', e.message); }
 };
 
-const saveStats = () => {
-    try {
-        ensureDataDir();
-        const data = Object.fromEntries(staffStats);
-        fs.writeFileSync(STATS_FILE, JSON.stringify(data, null, 2));
-    } catch (e) { console.error('[STATS] Kaydetme hatası:', e.message); }
-};
-
-setInterval(saveStats, 5 * 60 * 1000);
 loadStats();
 
 // ====================== SYNC FUNCTIONS ======================
@@ -110,75 +69,57 @@ const syncSystemAccounts = () => {
         isSeste: !!activeVoice,
         isMuted: activeVoice?.selfMute || false,
         isDeafened: activeVoice?.selfDeaf || false,
-        isStreaming: !!session.streamer?.voiceConnection,
+        isStreaming: !!session.isStreaming,
+        isCamera: !!session.isCamera,
         connectedAt: session.connectedAt,
         config: session.config,
         token: session.token
     };
   });
-  
   io.emit('sessionsUpdate', sessions);
 };
 
-const syncStaffPanel = () => {
-  const stats = Array.from(staffStats.entries()).map(([id, stat]) => ({
-    id,
-    name: stat.name,
-    avatar: stat.avatar,
-    onlineTime: stat.onlineTime || 0,
-    messageCount: stat.messageCount || 0,
-    voiceTime: stat.voiceTime || 0
-  }));
-  
-  io.emit('staffStatsUpdate', stats);
-  io.emit('staffLogsUpdate', staffLogs.slice(-50));
-};
-
-// ====================== CLEANUP ======================
-const cleanupSession = (session) => {
-  try {
-    if (session.voiceConnection) {
-      session.voiceConnection.destroy();
-    }
-    if (session.streamer) {
-      try { session.streamer.stopStream(); } catch (e) {}
-    }
-    if (session.client) {
-      session.client.destroy();
-    }
-    activeSessions.delete(session.client.user.id);
-  } catch (error) {
-    console.error('[CLEANUP] Hata:', error.message);
-  }
-};
-
-// ====================== STREAMING ======================
+// ====================== STREAMING (FAKE CAMERA & LIVE) ======================
 const startStream = async (session, guildId, channelId) => {
     if (!session.streamer) {
         session.streamer = new Streamer(session.client);
-        // Monkey-patch to force custom mic/sound config
-        session.streamer.signalVideo = function(video_enabled) {
+        
+        // Monkey-patch for Fake Camera + Live Stream signals
+        session.streamer.signalVideo = function(video_enabled, stream_enabled) {
             if (!this.voiceConnection) return;
             this.sendOpcode(4, {
                 guild_id: this.voiceConnection.guildId,
                 channel_id: this.voiceConnection.channelId,
                 self_mute: !session.config.media.mic,
                 self_deaf: !session.config.media.sound,
-                self_video: video_enabled,
+                self_video: video_enabled, // KAMERA İKONU
+                self_stream: stream_enabled // YAYINDA (LIVE) İKONU
             });
         };
     }
 
     try {
-        const streamAsset = session.config.cafeMode ? (fs.existsSync(CAFE_STATIC_PATH) ? CAFE_STATIC_PATH : BANNER_PATH) : BANNER_PATH;
+        const streamAsset = session.config.streamType === 'cafe' ? (fs.existsSync(CAFE_STATIC_PATH) ? CAFE_STATIC_PATH : BANNER_PATH) : BANNER_PATH;
         
-        // Use discordjs/voice connection from the session if available
         if (session.voiceConnection) {
             const udp = session.voiceConnection.voiceUdp;
             if (udp) {
-                session.streamer.signalVideo(!!session.config.media.camera);
-                await streamLivestreamVideo(streamAsset, udp);
-                console.log(`[STREAM] Yayın Aktif: ${session.client.user.username}`);
+                // Her iki sinyali de gönder (Yayın + Kamera)
+                session.streamer.signalVideo(!!session.config.media.camera, !!session.config.media.stream);
+                
+                await streamLivestreamVideo(streamAsset, udp, {
+                    width: 1280,
+                    height: 720,
+                    fps: 30,
+                    bitrateKbps: 2000,
+                    videoCodec: 'H264'
+                });
+
+                session.isStreaming = !!session.config.media.stream;
+                session.isCamera = !!session.config.media.camera;
+                
+                console.log(`[FAKE-CAM] ${session.client.user.username} için yayın ve kamera açıldı.`);
+                syncSystemAccounts();
                 return true;
             }
         }
@@ -196,19 +137,13 @@ const connectToVoice = async (client, serverId, voiceId, media) => {
       guildId: serverId,
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: !media.sound,
-      selfMute: !media.mic
+      selfMute: !media.mic,
+      selfVideo: !!media.camera
     });
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        connection.destroy();
-        reject(new Error('Ses bağlantısı zaman aşımına uğradı (15 saniye). Eğer sistemi Render/Vercel backend üzerinden kullanıyorsanız, Discord trafiği engellenmiş olabilir.'));
-      }, 15000);
-
-      connection.on(VoiceConnectionStatus.Ready, () => {
-        clearTimeout(timeout);
-        resolve(connection);
-      });
+      const timeout = setTimeout(() => { connection.destroy(); reject(new Error('Ses zaman aşımı.')); }, 15000);
+      connection.on(VoiceConnectionStatus.Ready, () => { clearTimeout(timeout); resolve(connection); });
     });
 };
 
@@ -219,17 +154,13 @@ const connectToken = async (data) => {
   const client = new Client({
     checkUpdate: false,
     patchVoice: true,
-    intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_VOICE_STATES, Intents.FLAGS.GUILD_MESSAGES],
+    intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_VOICE_STATES],
     ws: { properties: { $os: 'Windows', $browser: 'Discord Client', $device: 'Discord Client' } },
     ...(proxy && { http: { agent: new (require('https-proxy-agent').HttpsProxyAgent)(proxy) } })
   });
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => { client.destroy(); reject(new Error('Giriş zaman aşımına uğradı.')); }, 30000);
-
     client.on('ready', async () => {
-      clearTimeout(timeout);
-      
       const acts = media.stream ? [{ name: activityText || 'Dave.903 Live', type: 'STREAMING', url: 'https://twitch.tv/dave903' }] : 
                    activityText ? [{ name: activityText, type: 'PLAYING' }] : [];
 
@@ -238,30 +169,16 @@ const connectToken = async (data) => {
       const voiceConnection = await connectToVoice(client, serverId, voiceId, media);
       
       const session = {
-        client, token, voiceConnection, connectedAt: Date.now(),
-        config: { serverId, voiceId, presence, media, activityText, streamType, cafeMode: streamType === 'cafe' }
+        client, token, voiceConnection, connectedAt: Date.now(), isStreaming: false, isCamera: false,
+        config: { serverId, voiceId, presence, media, activityText, streamType }
       };
 
       activeSessions.set(client.user.id, session);
 
-      if (media.stream || media.camera || streamType === 'cafe') {
+      // Yayın ve Kamera Fake Başlatma
+      if (media.stream || media.camera) {
           setTimeout(() => startStream(session, serverId, voiceId), 2000);
       }
-
-      // Reconnect Logic
-      client.on('voiceStateUpdate', (oldState, newState) => {
-        if (newState.member.id === client.user.id && !newState.channelId) {
-            setTimeout(async () => {
-                if (activeSessions.has(client.user.id)) {
-                    try {
-                        const newConn = await connectToVoice(client, serverId, voiceId, media);
-                        session.voiceConnection = newConn;
-                        if (media.stream) startStream(session, serverId, voiceId);
-                    } catch (e) {}
-                }
-            }, 5000);
-        }
-      });
 
       syncSystemAccounts();
       resolve(client.user.username);
@@ -274,36 +191,27 @@ const connectToken = async (data) => {
 // ====================== ROUTES ======================
 app.post('/api/connect', async (req, res) => {
   const { tokens, serverId: rS, voiceId: rV, presence, media, proxy, activityText, streamType } = req.body;
-  const serverId = rS?.trim(); const voiceId = rV?.trim();
-  
-  if (!tokens || !Array.isArray(tokens)) return res.status(400).json({ error: 'Token listesi gerekli' });
-
   const results = { success: [], failed: [] };
+  
   for (let token of tokens) {
     try {
-      const username = await connectToken({ token: token.trim(), serverId, voiceId, presence, media, proxy, activityText, streamType });
+      const username = await connectToken({ token: token.trim(), serverId: rS?.trim(), voiceId: rV?.trim(), presence, media, proxy, activityText, streamType });
       results.success.push(username);
     } catch (e) {
-      results.failed.push({ token: token.slice(0, 15) + '...', error: e.message });
+      results.failed.push({ token: token.slice(0, 10), error: e.message });
     }
   }
 
-  res.json({
-    message: `${results.success.length} hesap bağlandı${results.failed.length > 0 ? `, ${results.failed.length} başarısız` : ''}`,
-    success: results.success,
-    failed: results.failed
-  });
+  res.json({ message: `${results.success.length} hesap bağlandı`, success: results.success, failed: results.failed });
 });
 
 app.post('/api/logout-all', (req, res) => {
-  activeSessions.forEach(s => cleanupSession(s));
+  activeSessions.forEach(s => { try { s.voiceConnection.destroy(); s.client.destroy(); } catch(e){} });
   activeSessions.clear();
   syncSystemAccounts();
   res.json({ success: true });
 });
 
-io.on('connection', (s) => { syncSystemAccounts(); syncStaffPanel(); });
+io.on('connection', (s) => { syncSystemAccounts(); });
 
-server.listen(PORT, () => {
-  console.log(`🚀 Dave.903 Backend sunucusu ${PORT} portunda aktif.`);
-});
+server.listen(PORT, () => { console.log(`🚀 Dave.903 Backend aktif: ${PORT}`); });
