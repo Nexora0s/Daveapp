@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Eye, EyeOff, Mic, MicOff, Headphones, HeadphoneOff, Video, VideoOff, Monitor, MonitorOff, Zap } from 'lucide-react';
 
 const BotPanel = ({
@@ -9,8 +9,13 @@ const BotPanel = ({
 }) => {
   const [showToken, setShowToken] = useState(false);
 
-  // ====================== ENVIRONMENT & BACKEND URL ======================
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+  // ====================== BACKEND URL (Production Ready) ======================
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+
+  // Eğer VITE_BACKEND_URL tanımlanmamışsa hata versin (güvenlik için)
+  if (!BACKEND_URL) {
+    console.error('❌ VITE_BACKEND_URL environment variable tanımlanmamış!');
+  }
 
   // ====================== HELPER FUNCTIONS ======================
   const getTokenList = () => {
@@ -19,22 +24,21 @@ const BotPanel = ({
       : [token.trim()].filter(t => t.length > 0);
   };
 
-  // Media toggle (update-media endpoint'ine istek atıyor)
+  // Media toggle
   const toggleMedia = async (key) => {
     const updatedMedia = { ...media, [key]: !media[key] };
     setMedia(updatedMedia);
 
     const tokenList = getTokenList();
-
-    if (tokenList.length === 0 || loading) return;
+    if (tokenList.length === 0 || loading || !BACKEND_URL) return;
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/update-media`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          tokens: tokenList, 
-          media: updatedMedia 
+        body: JSON.stringify({
+          tokens: tokenList,
+          media: updatedMedia
         }),
       });
 
@@ -43,7 +47,6 @@ const BotPanel = ({
       }
     } catch (error) {
       console.error('Media update request failed:', error);
-      // İsteğe bağlı: toast notification eklenebilir
     }
   };
 
@@ -182,8 +185,9 @@ const BotPanel = ({
         <p className="description">Açmak/kapatmak için butona basın — her hesap için aynı anda çalışır</p>
         
         <div className="media-toggle-grid">
-          <button 
-            className={`toggle-btn ${media.mic ? 'toggle-on' : 'toggle-off'}`} 
+          {/* Mikrofon */}
+          <button
+            className={`toggle-btn ${media.mic ? 'toggle-on' : 'toggle-off'}`}
             onClick={() => toggleMedia('mic')}
             type="button"
           >
@@ -199,8 +203,9 @@ const BotPanel = ({
             <div className={`toggle-indicator ${media.mic ? 'on' : 'off'}`}></div>
           </button>
 
-          <button 
-            className={`toggle-btn ${media.sound ? 'toggle-on' : 'toggle-off'}`} 
+          {/* Kulaklık */}
+          <button
+            className={`toggle-btn ${media.sound ? 'toggle-on' : 'toggle-off'}`}
             onClick={() => toggleMedia('sound')}
             type="button"
           >
@@ -216,7 +221,8 @@ const BotPanel = ({
             <div className={`toggle-indicator ${media.sound ? 'on' : 'off'}`}></div>
           </button>
 
-          <button 
+          {/* Kamera */}
+          <button
             className={`toggle-btn ${media.camera ? 'toggle-on' : 'toggle-off'}`}
             onClick={() => toggleMedia('camera')}
             type="button"
@@ -233,7 +239,8 @@ const BotPanel = ({
             <div className={`toggle-indicator ${media.camera ? 'on' : 'off'}`}></div>
           </button>
 
-          <button 
+          {/* Yayın */}
+          <button
             className={`toggle-btn ${media.stream ? 'toggle-on' : 'toggle-off'}`}
             onClick={() => toggleMedia('stream')}
             type="button"
@@ -251,7 +258,6 @@ const BotPanel = ({
           </button>
         </div>
 
-        {/* Active media summary */}
         {(media.camera || media.stream) && (
           <div className="media-summary">
             {media.camera && <span className="summary-pill cam">📷 Sadece Kamera aktif</span>}
@@ -276,8 +282,11 @@ const BotPanel = ({
         <div className="btn-glow"></div>
       </button>
 
-      {/* Styles */}
-      <style dangerouslySetInnerHTML={{ __html: ` /* ... (orijinal style bloğunu olduğu gibi bırakıyorum) ... */ ` }} />
+      {/* Styles - orijinal stil bloğunu buraya olduğu gibi yapıştır (kısalttım) */}
+      <style dangerouslySetInnerHTML={{ __html: ` 
+        /* Buraya orijinal <style> içindeki tüm CSS kodunu olduğu gibi yapıştır */
+        /* ... (senin önceki kodundaki style bloğunun tamamı) ... */
+      ` }} />
     </div>
   );
 };
