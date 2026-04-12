@@ -9,13 +9,8 @@ const BotPanel = ({
 }) => {
   const [showToken, setShowToken] = useState(false);
 
-  // ====================== BACKEND URL (Production Ready) ======================
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
-
-  // Eğer VITE_BACKEND_URL tanımlanmamışsa hata versin (güvenlik için)
-  if (!BACKEND_URL) {
-    console.error('❌ VITE_BACKEND_URL environment variable tanımlanmamış!');
-  }
+  // ====================== BACKEND URL (Vercel + Render için) ======================
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
   // ====================== HELPER FUNCTIONS ======================
   const getTokenList = () => {
@@ -24,26 +19,27 @@ const BotPanel = ({
       : [token.trim()].filter(t => t.length > 0);
   };
 
-  // Media toggle
+  // Media durumunu güncelle (toggle)
   const toggleMedia = async (key) => {
     const updatedMedia = { ...media, [key]: !media[key] };
     setMedia(updatedMedia);
 
     const tokenList = getTokenList();
-    if (tokenList.length === 0 || loading || !BACKEND_URL) return;
+
+    if (tokenList.length === 0 || loading) return;
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/update-media`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tokens: tokenList,
-          media: updatedMedia
+        body: JSON.stringify({ 
+          tokens: tokenList, 
+          media: updatedMedia 
         }),
       });
 
       if (!response.ok) {
-        console.warn(`Media update failed: ${response.status}`);
+        console.warn(`Media update failed with status: ${response.status}`);
       }
     } catch (error) {
       console.error('Media update request failed:', error);
@@ -59,12 +55,8 @@ const BotPanel = ({
           DDoS Koruması Aktif (Safe v4)
         </div>
         <div className="mode-tabs glass">
-          <button className={!isBulk ? 'active' : ''} onClick={() => setIsBulk(false)}>
-            Tekli
-          </button>
-          <button className={isBulk ? 'active' : ''} onClick={() => setIsBulk(true)}>
-            Toplu
-          </button>
+          <button className={!isBulk ? 'active' : ''} onClick={() => setIsBulk(false)}>Tekli</button>
+          <button className={isBulk ? 'active' : ''} onClick={() => setIsBulk(true)}>Toplu</button>
         </div>
       </div>
 
@@ -72,11 +64,8 @@ const BotPanel = ({
       <section className="input-group">
         <label>{isBulk ? "Hesap Token'ları (Toplu)" : "Hesap Token'ı"}</label>
         <p className="description">
-          {isBulk 
-            ? "Her satıra bir token gelecek şekilde yapıştırın" 
-            : "Bağlanacak hesabın token'ını girin"}
+          {isBulk ? "Her satıra bir token gelecek şekilde yapıştırın" : "Bağlanacak hesabın token'ını girin"}
         </p>
-        
         {isBulk ? (
           <textarea
             placeholder={"Token1\nToken2\n..."}
@@ -185,9 +174,8 @@ const BotPanel = ({
         <p className="description">Açmak/kapatmak için butona basın — her hesap için aynı anda çalışır</p>
         
         <div className="media-toggle-grid">
-          {/* Mikrofon */}
-          <button
-            className={`toggle-btn ${media.mic ? 'toggle-on' : 'toggle-off'}`}
+          <button 
+            className={`toggle-btn ${media.mic ? 'toggle-on' : 'toggle-off'}`} 
             onClick={() => toggleMedia('mic')}
             type="button"
           >
@@ -203,9 +191,8 @@ const BotPanel = ({
             <div className={`toggle-indicator ${media.mic ? 'on' : 'off'}`}></div>
           </button>
 
-          {/* Kulaklık */}
-          <button
-            className={`toggle-btn ${media.sound ? 'toggle-on' : 'toggle-off'}`}
+          <button 
+            className={`toggle-btn ${media.sound ? 'toggle-on' : 'toggle-off'}`} 
             onClick={() => toggleMedia('sound')}
             type="button"
           >
@@ -221,8 +208,7 @@ const BotPanel = ({
             <div className={`toggle-indicator ${media.sound ? 'on' : 'off'}`}></div>
           </button>
 
-          {/* Kamera */}
-          <button
+          <button 
             className={`toggle-btn ${media.camera ? 'toggle-on' : 'toggle-off'}`}
             onClick={() => toggleMedia('camera')}
             type="button"
@@ -239,8 +225,7 @@ const BotPanel = ({
             <div className={`toggle-indicator ${media.camera ? 'on' : 'off'}`}></div>
           </button>
 
-          {/* Yayın */}
-          <button
+          <button 
             className={`toggle-btn ${media.stream ? 'toggle-on' : 'toggle-off'}`}
             onClick={() => toggleMedia('stream')}
             type="button"
@@ -258,6 +243,7 @@ const BotPanel = ({
           </button>
         </div>
 
+        {/* Active media summary */}
         {(media.camera || media.stream) && (
           <div className="media-summary">
             {media.camera && <span className="summary-pill cam">📷 Sadece Kamera aktif</span>}
@@ -282,11 +268,138 @@ const BotPanel = ({
         <div className="btn-glow"></div>
       </button>
 
-      {/* Styles - orijinal stil bloğunu buraya olduğu gibi yapıştır (kısalttım) */}
-      <style dangerouslySetInnerHTML={{ __html: ` 
-        /* Buraya orijinal <style> içindeki tüm CSS kodunu olduğu gibi yapıştır */
-        /* ... (senin önceki kodundaki style bloğunun tamamı) ... */
-      ` }} />
+      {/* Styles */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .bot-panel { padding: 2.5rem; border-radius: 24px; display: flex; flex-direction: column; gap: 2rem; }
+        .top-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+        .mode-tabs { display: flex; padding: 4px; border-radius: 10px; gap: 4px; }
+        .mode-tabs button { padding: 6px 16px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: all 0.2s; border: none; background: transparent; }
+        .mode-tabs button.active { background: var(--accent-gold); color: #000; }
+        .input-group label { font-weight: 700; font-size: 1.1rem; display: block; margin-bottom: 2px; }
+        .description { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem; }
+        .glass-input { background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); padding: 12px 16px; border-radius: 12px; color: #fff; width: 100%; outline: none; transition: var(--transition); font-size: 0.95rem; }
+        .glass-input:focus { border-color: var(--accent-gold); background: rgba(255, 255, 255, 0.05); }
+        .bulk-textarea { min-height: 120px; resize: vertical; font-family: monospace; }
+        .input-row { position: relative; }
+        .toggle-visibility { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; }
+        .grid-row { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+        .presence-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .presence-btn { padding: 12px; border-radius: 12px; display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--text-muted); transition: var(--transition); cursor: pointer; }
+        .presence-btn.active { background: rgba(243, 156, 18, 0.05); border-color: var(--accent-gold); color: #fff; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.online { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
+        .status-dot.idle { background: #f1c40f; box-shadow: 0 0 8px #f1c40f; }
+        .status-dot.dnd { background: #e74c3c; box-shadow: 0 0 8px #e74c3c; }
+        .status-dot.invisible { background: #95a5a6; box-shadow: 0 0 8px #95a5a6; }
+        /* ============= Toggle Buttons ============= */
+        .media-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .toggle-btn {
+          position: relative;
+          display: flex; align-items: center; gap: 14px;
+          padding: 18px 20px;
+          border-radius: 16px;
+          cursor: pointer;
+          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+          border: 2px solid transparent;
+          overflow: hidden;
+        }
+        .toggle-btn.toggle-off {
+          background: rgba(255, 255, 255, 0.03);
+          border-color: rgba(255, 255, 255, 0.08);
+        }
+        .toggle-btn.toggle-off:hover {
+          background: rgba(255, 255, 255, 0.06);
+          border-color: rgba(255, 255, 255, 0.15);
+          transform: translateY(-1px);
+        }
+        .toggle-btn.toggle-off .toggle-icon-wrap {
+          background: rgba(255, 255, 255, 0.05);
+          color: #666;
+        }
+        .toggle-btn.toggle-on {
+          background: rgba(46, 204, 113, 0.08);
+          border-color: rgba(46, 204, 113, 0.3);
+          box-shadow: 0 4px 20px rgba(46, 204, 113, 0.1), inset 0 1px 0 rgba(46, 204, 113, 0.1);
+        }
+        .toggle-btn.toggle-on:hover {
+          background: rgba(46, 204, 113, 0.12);
+          border-color: rgba(46, 204, 113, 0.5);
+          transform: translateY(-2px);
+          box-shadow: 0 8px 30px rgba(46, 204, 113, 0.15);
+        }
+        .toggle-btn.toggle-on .toggle-icon-wrap {
+          background: rgba(46, 204, 113, 0.15);
+          color: #2ecc71;
+          box-shadow: 0 0 12px rgba(46, 204, 113, 0.2);
+        }
+        .toggle-icon-wrap {
+          width: 48px; height: 48px;
+          border-radius: 14px;
+          display: grid; place-items: center;
+          transition: all 0.25s;
+          flex-shrink: 0;
+        }
+        .toggle-info {
+          display: flex; flex-direction: column; gap: 3px;
+          text-align: left;
+        }
+        .toggle-label {
+          font-size: 0.95rem; font-weight: 700; color: #fff;
+        }
+        .toggle-state {
+          font-size: 0.72rem; font-weight: 800;
+          letter-spacing: 1.5px; text-transform: uppercase;
+        }
+        .toggle-state.on { color: #2ecc71; }
+        .toggle-state.off { color: #666; }
+        .toggle-indicator {
+          position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+          width: 12px; height: 12px;
+          border-radius: 50%;
+          transition: all 0.25s;
+        }
+        .toggle-indicator.on {
+          background: #2ecc71;
+          box-shadow: 0 0 8px #2ecc71, 0 0 20px rgba(46, 204, 113, 0.3);
+        }
+        .toggle-indicator.off {
+          background: #333;
+          border: 2px solid #555;
+        }
+        .media-summary {
+          margin-top: 12px;
+          display: flex; gap: 8px; flex-wrap: wrap;
+        }
+        .summary-pill {
+          font-size: 0.8rem; font-weight: 600;
+          padding: 8px 16px; border-radius: 10px;
+        }
+        .summary-pill.cam {
+          background: rgba(46, 204, 113, 0.1);
+          color: #2ecc71;
+          border: 1px solid rgba(46, 204, 113, 0.2);
+        }
+        .summary-pill.stream {
+          background: rgba(52, 152, 219, 0.1);
+          color: #3498db;
+          border: 1px solid rgba(52, 152, 219, 0.2);
+        }
+        .security-badge {
+          display: flex; align-items: center; gap: 10px;
+          background: rgba(46, 204, 113, 0.1); color: #2ecc71;
+          padding: 8px 16px; border-radius: 12px; font-size: 0.8rem;
+          font-weight: 600; border: 1px solid rgba(46, 204, 113, 0.2); width: fit-content;
+        }
+        .pulse {
+          width: 8px; height: 8px; background: #2ecc71; border-radius: 50%;
+          box-shadow: 0 0 0 rgba(46, 204, 113, 0.4); animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.4); }
+          70% { box-shadow: 0 0 0 10px rgba(46, 204, 113, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+        }
+      `}} />
     </div>
   );
 };
