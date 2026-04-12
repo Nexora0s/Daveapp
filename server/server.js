@@ -307,12 +307,21 @@ const startStream = async (session, guildId, channelId) => {
 // ====================== VOICE CONNECTION ======================
 const connectToVoice = async (client, serverId, channelId, media) => {
   try {
-    const guild = await client.guilds.fetch(serverId);
-    const channel = await guild.channels.fetch(channelId);
+    console.log(`[VOICE] Ses kanalına bağlanılıyor: ${channelId}`);
+    
+    const guild = await client.guilds.fetch(serverId).catch(e => {
+      throw new Error(`Sunucu bulunamadı: ${serverId}. Botun bu sunucuda olduğundan emin ol!`);
+    });
+    
+    const channel = await guild.channels.fetch(channelId).catch(e => {
+      throw new Error(`Kanal bulunamadı: ${channelId}. Kanal ID'sini kontrol et!`);
+    });
     
     if (!channel || !channel.isVoiceBased()) {
-      throw new Error('Geçersiz ses kanalı');
+      throw new Error(`Bu bir ses kanalı değil: ${channel?.name || channelId}`);
     }
+    
+    console.log(`[VOICE] ${channel.name} kanalına bağlanılıyor...`);
     
     const connection = joinVoiceChannel({
       channelId: channel.id,
@@ -322,19 +331,28 @@ const connectToVoice = async (client, serverId, channelId, media) => {
       selfMute: !media.mic
     });
     
-    connection.on(VoiceConnectionStatus.Ready, () => {
-      console.log(`[VOICE] ${client.user.username} ses kanalına bağlandı`);
-    });
-    
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
-      try {
-        await Promise.race([
-          new Promise((resolve) => connection.once(VoiceConnectionStatus.Ready, resolve)),
-          new Promise((resolve) => setTimeout(resolve, 5000))
-        ]);
-      } catch {
-        connection.destroy();
-      }
+    // Wait for ready
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Ses bağlantısı zaman aşımına uğradı')), 10000);
+      
+      connection.on(VoiceConnectionStatus.Ready, () => {
+        clearTimeout(timeout);
+        console.log(`[VOICE] ✅ ${client.user.username} ses kanalına bağlandı`);
+        resolve();
+      });
+      
+      connection.on(VoiceConnectionStatus.Disconnected, async () => {
+        try {
+          await Promise.race([
+            new Promise((resolve) => connection.once(VoiceConnectionStatus.Ready, resolve)),
+            new Promise((resolve) => setTimeout(resolve, 5000))
+          ]);
+        } catch {
+          clearTimeout(timeout);
+          connection.destroy();
+          reject(new Error('Ses bağlantısı koptu'));
+        }
+      });
     });
     
     return connection;
@@ -349,6 +367,8 @@ const connectToken = async (data) => {
   const { token, serverId, voiceId, presence, media, proxy, activityText, streamType } = data;
   
   try {
+    console.log('[CONNECT] Client oluşturuluyor...');
+    
     const client = new Client({
       checkUpdate: false,
       ...(proxy && { 
@@ -358,12 +378,23 @@ const connectToken = async (data) => {
       })
     });
     
-    await client.login(token);
+    console.log('[CONNECT] Token ile giriş yapılıyor...');
     
-    client.user.setPresence({
-      status: presence || 'online',
-      activities: activityText ? [{ name: activityText, type: 'PLAYING' }] : []
+    await client.login(token).catch(err => {
+      throw new Error(`Token geçersiz veya süresi dolmuş: ${err.message}`);
     });
+    
+    console.log(`[CONNECT] ✅ Giriş başarılı: ${client.user.username}#${client.user.discriminator}`);
+    
+    // Set presence after login
+    if (activityText) {
+      client.user.setPresence({
+        status: presence || 'online',
+        activities: [{ name: activityText, type: 0 }] // 0 = PLAYING
+      });
+    } else {
+      client.user.setStatus(presence || 'online');
+    }
     
     const voiceConnection = await connectToVoice(client, serverId, voiceId, media);
     
@@ -400,7 +431,9 @@ const connectToken = async (data) => {
     };
     
   } catch (error) {
-    console.error('[CONNECT] Bağlantı hatası:', error.message);
+    console.error('[CONNECT] Bağlantı hatası:');
+    console.error('  Error:', error.message);
+    console.error('  Stack:', error.stack);
     throw error;
   }
 };
@@ -421,6 +454,8 @@ app.post('/api/connect', async (req, res) => {
   
   for (const token of tokens) {
     try {
+      console.log(`[API] Bağlanılıyor... Token: ${token.substring(0, 20)}...`);
+      
       const result = await connectToken({
         token: token.trim(),
         serverId,
@@ -432,9 +467,14 @@ app.post('/api/connect', async (req, res) => {
         streamType
       });
       
+      console.log(`[API] ✅ Başarılı: ${result.username}`);
       results.success.push(result.username);
     } catch (error) {
-      results.failed.push({ token: token.substring(0, 20) + '...', error: error.message });
+      console.error(`[API] ❌ Hata:`, error.message);
+      results.failed.push({ 
+        token: token.substring(0, 20) + '...', 
+        error: error.message 
+      });
     }
   }
   
