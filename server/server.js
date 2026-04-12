@@ -11,22 +11,20 @@ const { Streamer } = require('@dank074/discord-video-stream');
 
 // ====================== CONFIG ======================
 const PORT = process.env.PORT || 3001;
-const ALLOWED_ORIGINS = ['*']; 
 process.env.FFMPEG_PATH = ffmpeg.path;
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: ALLOWED_ORIGINS, methods: ["GET", "POST"] } });
+const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const BANNER_PATH = path.join(__dirname, 'assets', 'stream_banner.png');
 const CAFE_STATIC_PATH = path.join(__dirname, 'assets', 'cafe_static.png');
 const activeSessions = new Map();
 
-// ====================== SYNC ======================
 const syncSystemAccounts = () => {
     const sessions = Array.from(activeSessions.values()).map(s => ({
         id: s.client.user?.id,
@@ -40,38 +38,51 @@ const syncSystemAccounts = () => {
     io.emit('sessionsUpdate', sessions);
 };
 
-// ====================== STREAMING CORE ======================
+// ====================== ULTIMATE STREAMING CORE ======================
 const startStream = async (session, guildId, channelId) => {
     try {
         if (!session.streamer) session.streamer = new Streamer(session.client);
         
-        // 1. Ses kanalına bağlan
+        console.log(`[SIGNAL] ${session.client.user.username} için yayın sinyalleri hazırlanıyor...`);
+
+        // 1. Kanala giriş
         await session.streamer.joinVoice(guildId, channelId);
         
-        // 2. Kamera ve Yayın Sinyallerini Gönder
+        // 2. Discord'a "Ben yayın açıyorum" sinyali gönder (OP 4 + Metadata)
+        const streamOptions = {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            bitrateKbps: 2500,
+            maxBitrateKbps: 3000,
+            videoCodec: 'H264'
+        };
+
+        // 3. UDP Oluştur
+        const udp = await session.streamer.createStream(streamOptions);
+
+        // 4. KRİTİK: Discord'un beklediği Fake Camera ve Go Live paketlerini manuel force et
         session.client.ws.send({
             op: 4,
             d: {
                 guild_id: guildId,
                 channel_id: channelId,
-                self_mute: !session.config.media.mic,
-                self_deaf: !session.config.media.sound,
-                self_video: !!session.config.media.camera,
-                self_stream: !!session.config.media.stream
+                self_mute: !!session.config?.media?.mic === false,
+                self_deaf: !!session.config?.media?.sound === false,
+                self_video: true, // Kamera ikonunu zorla aç
+                self_stream: true // Yayın rozetini zorla aç
             }
         });
 
-        // 3. UDP ve Yayın Oluştur
-        const udp = await session.streamer.createStream();
-        const asset = session.config.streamType === 'cafe' ? CAFE_STATIC_PATH : BANNER_PATH;
-        
+        // 5. Yayını teknik olarak başlat
+        const asset = session.config.streamType === 'cafe' ? (fs.existsSync(CAFE_STATIC_PATH) ? CAFE_STATIC_PATH : BANNER_PATH) : BANNER_PATH;
         session.streamer.playVideo(asset, udp);
         
-        session.isStreaming = !!session.config.media.stream;
-        session.isCamera = !!session.config.media.camera;
-        
+        session.isStreaming = true;
+        session.isCamera = true;
         syncSystemAccounts();
-        console.log(`[BAŞARILI] ${session.client.user.username} yayına ve kameraya bağlandı.`);
+        
+        console.log(`[ULTIMATE-FIX] ✅ ${session.client.user.username} yayını başarıyla Discord'a yansıtıldı.`);
     } catch (e) {
         console.error('[YAYIN HATASI]', e.message);
     }
@@ -87,13 +98,13 @@ const connectToken = async (data) => {
     });
 
     return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => { client.destroy(); reject(new Error('Bağlantı zaman aşımı.')); }, 30000);
-
         client.on('ready', async () => {
-            clearTimeout(timeout);
+            const acts = [{ 
+                name: 'Dave.903 Live', 
+                type: 'STREAMING', 
+                url: 'https://twitch.tv/dave903' 
+            }];
             
-            // Streaming status
-            const acts = media.stream ? [{ name: 'Dave.903 Live', type: 'STREAMING', url: 'https://twitch.tv/dave903' }] : [];
             client.user.setPresence({ status: presence || 'online', activities: acts });
             
             const session = { 
@@ -102,9 +113,12 @@ const connectToken = async (data) => {
             };
             activeSessions.set(client.user.id, session);
 
-            if (media.stream || media.camera) {
-                await startStream(session, serverId, voiceId);
-            }
+            // KRİTİK: Bağlandıktan 3 saniye sonra, ses sunucusu tamamen hazır olduğunda yayını başlat
+            setTimeout(() => {
+                if (media.stream || media.camera) {
+                    startStream(session, serverId, voiceId);
+                }
+            }, 3000);
 
             syncSystemAccounts();
             resolve(client.user.username);
@@ -114,23 +128,21 @@ const connectToken = async (data) => {
     });
 };
 
-// ====================== ROUTES ======================
+// ====================== API ======================
 app.post('/api/connect', async (req, res) => {
     const { tokens, serverId: rS, voiceId: rV, presence, media } = req.body;
     const sId = rS?.trim(); const vId = rV?.trim();
     
-    if (!tokens || !Array.isArray(tokens)) return res.status(400).json({ error: 'Token listesi hatalı' });
-
     for (const token of tokens) {
-        try {
-            await connectToken({ token: token.trim(), serverId: sId, voiceId: vId, presence, media });
-        } catch (e) { console.error(`[BAGLANTI HATASI] ${e.message}`); }
+        if (!token) continue;
+        connectToken({ token: token.trim(), serverId: sId, voiceId: vId, presence, media }).catch(console.error);
+        await new Promise(r => setTimeout(r, 2000)); // Discord rate limit koruması
     }
-    res.json({ message: "İşlem tamamlandı (Arka planda bağlanılıyor)" });
+    res.json({ message: "Sistem arka planda başlatıldı." });
 });
 
 app.post('/api/logout-all', (req, res) => {
-    activeSessions.forEach(s => { try { s.client.destroy(); } catch(e){} });
+    activeSessions.forEach(s => s.client.destroy());
     activeSessions.clear();
     syncSystemAccounts();
     res.json({ success: true });
@@ -139,5 +151,5 @@ app.post('/api/logout-all', (req, res) => {
 io.on('connection', (s) => { syncSystemAccounts(); });
 
 server.listen(PORT, () => {
-    console.log(`🚀 Dave.903 Backend sunucusu ${PORT} portunda aktif.`);
+    console.log(`🚀 Dave.903 ULTIMATE-FIX Sunucusu ${PORT} portunda aktif.`);
 });
