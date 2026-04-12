@@ -5,7 +5,7 @@ const BotPanel = ({
   token, setToken, tokens, setTokens, isBulk, setIsBulk,
   serverId, setServerId, voiceId, setVoiceId,
   presence, setPresence, activityText, setActivityText,
-  proxy, setProxy, media, setMedia, loading, progress, handleConnect
+  proxy, setProxy, media, setMedia, loading, handleConnect
 }) => {
   const [showToken, setShowToken] = useState(false);
 
@@ -212,9 +212,7 @@ const BotPanel = ({
       >
         <div className="btn-content">
           <Zap size={20} fill="currentColor" />
-          {loading
-            ? (progress.total > 0 ? `Bağlanıyor (${progress.current}/${progress.total})` : 'Bağlanıyor...')
-            : 'Sistemi Başlat / Bağlan'}
+          {loading ? 'Bağlanıyor...' : 'Sistemi Başlat / Bağlan'}
         </div>
         <div className="btn-glow"></div>
       </button>
