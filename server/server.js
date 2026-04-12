@@ -13,7 +13,7 @@ const helmet = require('helmet');
 const fs = require('fs');
 
 const STATS_FILE = path.join(__dirname, 'data', 'staff_stats.json');
-if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
+if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
 
 process.env.FFMPEG_PATH = ffmpeg.path;
 const PORT = process.env.PORT || 3001;
@@ -28,53 +28,44 @@ app.use(express.json());
 
 const BANNER_PATH = path.join(__dirname, 'assets', 'stream_banner.png');
 const CAFE_STATIC_PATH = path.join(__dirname, 'assets', 'cafe_static.png');
+
 const activeSessions = new Map();
 const staffStats = new Map();
-const monitoredGuilds = new Map();
 let staffLogs = [];
 
-// ====================== SYNC & STATS ======================
-const loadStats = () => {
-    try {
-        if (fs.existsSync(STATS_FILE)) {
-            const data = JSON.parse(fs.readFileSync(STATS_FILE));
-            Object.entries(data).forEach(([id, stats]) => staffStats.set(id, stats));
-        }
-    } catch (e) { console.error('Stats load error:', e); }
-};
-loadStats();
-
+// ====================== SYNC FUNCTIONS ======================
 const syncSystemAccounts = () => {
-  const sessionsData = [];
-  activeSessions.forEach((session) => {
+  const sessionsData = Array.from(activeSessions.values()).map((session) => {
     const client = session.client;
-    if (client.user && client.readyAt) {
-      sessionsData.push({
-        id: client.user.id, 
+    const guild = client.guilds.cache.get(session.config.serverId);
+    const me = guild?.members.me;
+    const vs = me?.voice;
+
+    return {
+        id: client.user?.id, 
         token: session.token,
-        username: client.user.username,
-        avatar: client.user.displayAvatarURL(),
-        status: client.user.presence?.status || 'online',
-        isSeste: !!session.isSeste, 
+        username: client.user?.username,
+        avatar: client.user?.displayAvatarURL(),
+        status: client.user?.presence?.status || 'online',
+        isSeste: !!vs?.channelId, 
+        isMuted: vs?.selfMute || false,
+        isDeafened: vs?.selfDeaf || false,
         isStreaming: !!session.isStreaming, 
+        isCamera: !!session.isCamera,
         config: session.config,
         connectedAt: session.connectedAt
-      });
-    }
+    };
   });
   io.emit('sessionsUpdate', sessionsData);
 };
 
-// ====================== STREAMING CORE ======================
+// ====================== CORE ACTIONS ======================
 const startStream = async (session, guildId, channelId) => {
-    if (!session.streamer) {
-        session.streamer = new Streamer(session.client);
-    }
-
+    if (!session.streamer) session.streamer = new Streamer(session.client);
+    
     try {
         await session.streamer.joinVoice(guildId, channelId);
         
-        // FORCE SIGNAL (IKONLAR ICIN)
         session.client.ws.send({
             op: 4,
             d: {
@@ -88,60 +79,72 @@ const startStream = async (session, guildId, channelId) => {
         });
 
         const udp = await session.streamer.createStream();
-        const asset = session.config.streamType === 'cafe' ? CAFE_STATIC_PATH : BANNER_PATH;
+        const asset = session.config.streamType === 'cafe' ? (fs.existsSync(CAFE_STATIC_PATH) ? CAFE_STATIC_PATH : BANNER_PATH) : BANNER_PATH;
         
         session.streamer.playVideo(asset, udp);
         session.isStreaming = true;
-        session.isSeste = true;
+        session.isCamera = true;
         syncSystemAccounts();
     } catch (e) {
-        console.error('Streaming error:', e.message);
+        console.error('[STREAM ERROR]', e.message);
     }
 };
 
-// ====================== CONNECTION LOGIC ======================
 const connectToken = async (data) => {
-  const { token, serverId, voiceId, presence, media, proxy, activityText, streamType, cafeMode } = data;
-  const options = { 
-      checkUpdate: false, 
-      patchVoice: true,
-      intents: new Intents(Intents.ALL),
-      ws: { properties: { $os: 'Windows', $browser: 'Discord Client', $device: 'Discord Client' } }
-  };
-  if (proxy) options.http = { agent: new HttpsProxyAgent(proxy) };
+  const { token, serverId, voiceId, presence, media, proxy, activityText } = data;
   
-  const client = new Client(options);
+  const client = new Client({
+    checkUpdate: false,
+    patchVoice: true,
+    intents: new Intents(Intents.ALL),
+    ws: { properties: { $os: 'Windows', $browser: 'Discord Client', $device: 'Discord Client' } },
+    ...(proxy && { http: { agent: new HttpsProxyAgent(proxy) } })
+  });
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => { client.destroy(); reject(new Error('Zaman aşımı.')); }, 30000);
-
     client.on('ready', async () => {
-      clearTimeout(timeout);
+      const acts = media.stream ? [{ name: activityText || 'Dave.903 Live', type: 'STREAMING', url: 'https://twitch.tv/dave903' }] : [];
+      client.user.setPresence({ status: presence || 'online', activities: acts });
       
-      client.user.setPresence({ 
-          status: presence || 'online', 
-          activities: media.stream ? [{ name: activityText || 'Dave.903 Live', type: 'STREAMING', url: 'https://twitch.tv/dave903' }] : [] 
-      });
-      
-      const guild = client.guilds.cache.get(serverId);
       const session = { 
-          client, token, isStreaming: false, isSeste: false,
-          config: { serverId, voiceId, presence, media, activityText, streamType } 
+          client, token, isStreaming: false, isCamera: false,
+          config: { serverId, voiceId, presence, media, activityText } 
       };
       activeSessions.set(client.user.id, session);
 
-      if (guild) {
+      // İlk Bağlantı
+      try {
           if (media.camera || media.stream) {
               await startStream(session, serverId, voiceId);
           } else {
-              joinVoiceChannel({ 
-                  channelId: voiceId, guildId: serverId, adapterCreator: guild.voiceAdapterCreator, 
-                  selfMute: !media.mic, selfDeaf: !media.sound 
-              });
-              session.isSeste = true;
+              const guild = client.guilds.cache.get(serverId);
+              joinVoiceChannel({ channelId: voiceId, guildId: serverId, adapterCreator: guild.voiceAdapterCreator, selfMute: !media.mic, selfDeaf: !media.sound });
           }
-      }
-      
+      } catch (e) { console.error('[INIT VOICE ERROR]', e.message); }
+
+      // ANLIK TAKIP VE OTO-RECONNECT (BOZMADAN)
+      client.on('voiceStateUpdate', (oldState, newState) => {
+          if (newState.member.id === client.user.id) {
+              // Sesten atılınca veya çıkınca otomatik geri bağlan
+              if (!newState.channelId) {
+                  console.log(`[RECONNECT] ${client.user.username} sesten atıldı, 5 saniye içinde geri bağlanılıyor...`);
+                  setTimeout(async () => {
+                      if (activeSessions.has(client.user.id)) {
+                          const s = activeSessions.get(client.user.id);
+                          if (s.config.media.camera || s.config.media.stream) {
+                              await startStream(s, s.config.serverId, s.config.voiceId);
+                          } else {
+                              const g = client.guilds.cache.get(s.config.serverId);
+                              if (g) joinVoiceChannel({ channelId: s.config.voiceId, guildId: s.config.serverId, adapterCreator: g.voiceAdapterCreator, selfMute: !s.config.media.mic, selfDeaf: !s.config.media.sound });
+                          }
+                      }
+                  }, 5000);
+              }
+              // Durumu her zaman UI'a yansıt
+              syncSystemAccounts();
+          }
+      });
+
       syncSystemAccounts();
       resolve(client.user.username);
     });
@@ -150,18 +153,17 @@ const connectToken = async (data) => {
   });
 };
 
+// ====================== API ROUTES ======================
 app.post('/api/connect', async (req, res) => {
   const { tokens, serverId, voiceId, presence, media, proxy, activityText } = req.body;
   const tList = Array.isArray(tokens) ? tokens : [req.body.token];
   
   for (const token of tList) {
     if (!token) continue;
-    try {
-        await connectToken({ token: token.trim(), serverId, voiceId, presence, media, proxy, activityText });
-        await new Promise(r => setTimeout(r, 2000));
-    } catch (e) { console.error(e.message); }
+    connectToken({ token: token.trim(), serverId, voiceId, presence, media, proxy, activityText }).catch(e => console.error(e.message));
+    await new Promise(r => setTimeout(r, 1500));
   }
-  res.json({ message: "İşlem başlatıldı." });
+  res.json({ message: "Bağlantı işlemi arka planda başlatıldı." });
 });
 
 app.post('/api/logout-all', (req, res) => {
@@ -173,4 +175,4 @@ app.post('/api/logout-all', (req, res) => {
 
 io.on('connection', (s) => { syncSystemAccounts(); });
 
-server.listen(PORT, () => console.log(`🚀 Dave.903 Sunucusu Aktif: ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Dave.903 Her Şey Dahil Sunucu: ${PORT}`));
