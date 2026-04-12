@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { LayoutGrid, Users, ExternalLink, Mic, MicOff, Headphones, HeadphoneOff, Video, VideoOff, Monitor, MonitorOff, LogOut, Trash2, Play, Shield, Coffee, WifiOff } from 'lucide-react';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+
 const UptimeTracker = ({ connectedAt }) => {
   const [uptime, setUptime] = useState('');
 
@@ -28,7 +30,7 @@ const UptimeTracker = ({ connectedAt }) => {
 const Sidebar = ({ sessions = [], activeView = 'bot', setActiveView }) => {
   const handleLogout = async (userId) => {
     try {
-      const resp = await fetch('http://localhost:3001/api/logout', {
+      const resp = await fetch(`${BACKEND_URL}/api/logout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId })
@@ -44,7 +46,7 @@ const Sidebar = ({ sessions = [], activeView = 'bot', setActiveView }) => {
   const handleLogoutAll = async () => {
     if (!window.confirm('Tüm oturumları kapatmak istediğinize emin misiniz?')) return;
     try {
-      await fetch('http://localhost:3001/api/logout-all', { method: 'POST' });
+      await fetch(`${BACKEND_URL}/api/logout-all`, { method: 'POST' });
     } catch (e) {
       console.error('Logout all error:', e);
     }
@@ -58,7 +60,7 @@ const Sidebar = ({ sessions = [], activeView = 'bot', setActiveView }) => {
     const updatedMedia = { ...currentMedia, [key]: !currentMedia[key] };
 
     try {
-      await fetch('http://localhost:3001/api/update-media', {
+      await fetch(`${BACKEND_URL}/api/update-media`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tokens: [user.token], media: updatedMedia })
