@@ -17,7 +17,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['https://daveapp-delta.vercel.app', 'http://localhost:5173', 'http://localhost:3000'];
+  : ['*']; // Vercel ve Render'da kolay kurulum için '*' (Helmet ile korunuyor)
 
 const STATS_FILE = path.join(__dirname, 'data', 'staff_stats.json');
 
@@ -333,7 +333,10 @@ const connectToVoice = async (client, serverId, channelId, media) => {
     
     // Wait for ready
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Ses bağlantısı zaman aşımına uğradı')), 10000);
+      const timeout = setTimeout(() => {
+        connection.destroy();
+        reject(new Error('Ses bağlantısı zaman aşımına uğradı (15 saniye). Eğer sistemi Render/Vercel backend üzerinden kullanıyorsanız, Discord voice trafiği platform tarafından engellenmiş olabilir veya bir Proxy kullanmanız gerekebilir.'));
+      }, 15000);
       
       connection.on(VoiceConnectionStatus.Ready, () => {
         clearTimeout(timeout);
@@ -371,17 +374,27 @@ const connectToken = async (data) => {
     
     const client = new Client({
       checkUpdate: false,
+      patchVoice: true,
+      autoRedeemNitro: false,
+      ws: {
+          properties: {
+              $os: 'Windows',
+              $browser: 'Discord Client',
+              $device: 'Discord Client'
+          }
+      },
       ...(proxy && { 
         http: { 
           agent: new (require('https-proxy-agent').HttpsProxyAgent)(proxy)
         } 
       })
     });
-    
-    console.log('[CONNECT] Token ile giriş yapılıyor...');
+
+    console.log(`[CONNECT] Token girişi deneniyor... (${token.substring(0, 10)}...)`);
     
     await client.login(token).catch(err => {
-      throw new Error(`Token geçersiz veya süresi dolmuş: ${err.message}`);
+      console.error(`[LOGIN ERROR] ${token.substring(0, 10)}:`, err.message);
+      throw new Error(`Hesaba giriş yapılamadı. Token yanlış olabilir veya hesap doğrulamaya (2FA/Email) düşmüş olabilir.`);
     });
     
     console.log(`[CONNECT] ✅ Giriş başarılı: ${client.user.username}#${client.user.discriminator}`);
@@ -440,7 +453,9 @@ const connectToken = async (data) => {
 
 // ====================== API ROUTES ======================
 app.post('/api/connect', async (req, res) => {
-  const { tokens, serverId, voiceId, presence, media, proxy, activityText, streamType } = req.body;
+  const { tokens, serverId: rawServerId, voiceId: rawVoiceId, presence, media, proxy, activityText, streamType } = req.body;
+  const serverId = rawServerId?.trim();
+  const voiceId = rawVoiceId?.trim();
   
   if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
     return res.status(400).json({ error: 'Token listesi gerekli' });
