@@ -6,7 +6,8 @@ import StaffPanel from './components/StaffPanel';
 import { io } from 'socket.io-client';
 import './App.css';
 
-const socket = io('http://localhost:3001');
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const socket = io(BACKEND_URL);
 
 function App() {
   const [sessions, setSessions] = useState([]);
@@ -42,7 +43,7 @@ function App() {
     setProgress({ current: 0, total: currentTokens.length });
     
     try {
-      const response = await fetch('http://localhost:3001/api/connect', {
+      const response = await fetch(`${BACKEND_URL}/api/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
