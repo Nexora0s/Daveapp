@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { Client } = require('discord.js-selfbot-v13');
+const { Client, Intents } = require('discord.js-selfbot-v13');
 const { Server } = require('socket.io');
 const http = require('http');
 const path = require('path');
@@ -376,6 +376,7 @@ const connectToken = async (data) => {
       checkUpdate: false,
       patchVoice: true,
       autoRedeemNitro: false,
+      intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_VOICE_STATES, Intents.FLAGS.GUILD_MESSAGES],
       ws: {
           properties: {
               $os: 'Windows',
@@ -467,12 +468,15 @@ app.post('/api/connect', async (req, res) => {
   
   const results = { success: [], failed: [] };
   
-  for (const token of tokens) {
+  for (let token of tokens) {
+    token = token.trim();
+    if (!token) continue;
+    
     try {
-      console.log(`[API] Bağlanılıyor... Token: ${token.substring(0, 20)}...`);
+      console.log(`[API] Bağlanılıyor... Token: ${token.substring(0, 15)}...`);
       
       const result = await connectToken({
-        token: token.trim(),
+        token,
         serverId,
         voiceId,
         presence,
