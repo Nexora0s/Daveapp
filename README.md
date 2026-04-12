@@ -1,42 +1,108 @@
-# Dave.903 - Profosyonel Discord AFK & Yetkili Takip Sistemi
+# DAVEAPP DEPLOYMENT KILAVUZU
 
-**Dave.903**, Discord botlarınızı yönetmek, medya yayınları yapmak ve sunucunuzdaki yetkili performansını anlık olarak takip etmek için geliştirilmiş, premium bir yönetim panelidir.
+## ⚠️ ÖNEMLİ: SENİN YAPMAN GEREKENLER
 
-![Dashboard Preview](https://api.dicebear.com/7.x/avataaars/svg?seed=Dave903)
+### 1️⃣ BACKEND (RENDER.COM) DEPLOY
 
-## 🚀 Ana Özellikler
+**Adım 1:** Render.com → "New +" → "Web Service"
 
-- **Gelişmiş Bot Kontrolü**: Tekli veya toplu olarak hesaplarınızı sese sokun.
-- **Medya Akışı (Live Stream)**: FFmpeg altyapısı ile botlarınıza özel banner/video yayını yaptırın.
-- **Yetkili Sayım Paneli (YSP)**: Sunucudaki yetkililerin ses sürelerini ve attığı mesajları anlık olarak takip edin.
-- **Kalıcı Veri (Persistence)**: Tüm yetkili istatistikleri ve logları `staff_stats.json` dosyasında güvenle saklanır.
-- **DDoS & Güvenlik**: Express rate-limit ve Helmet ile güçlendirilmiş güvenli API yapısı.
-- **Auto-Reconnect**: Düşen botlar 5 saniye içinde otomatik olarak eski kanalına geri bağlanır.
+**Adım 2:** GitHub repo'yu bağla
 
-## 🛠 Kurulum
+**Adım 3:** Ayarlar:
+```
+Name: daveapp-backend
+Root Directory: server
+Build Command: npm install
+Start Command: npm start
+```
 
-1. **Bağımlılıkları Yükleyin**:
-   ```bash
-   npm install
-   cd server
-   npm install
-   ```
-2. **Sistemi Çalıştırın**:
-   Kök dizindeki `run.bat` dosyasına çift tıklayın. Bu, hem Backend hem de Frontend'i otomatik olarak başlatacaktır.
+**Adım 4:** Environment Variables ekle:
+```
+NODE_ENV=production
+PORT=10000
+ALLOWED_ORIGINS=http://localhost:5173
+```
+(İlk deploy için localhost, sonra Vercel URL'i ekleyeceğiz)
 
-## 📁 Dosya Yapısı
+**Adım 5:** "Create Web Service" → Deploy tamamlanana kadar bekle
 
-- `/server`: Node.js, Express ve Socket.io tabanlı ana sunucu.
-- `/src`: React (Vite) tabanlı modern UI bileşenleri.
-- `/server/data`: Yetkili verilerinin saklandığı JSON veritabanı.
-- `/server/assets`: Medya yayınları için kullanılan görseller.
-
-## 🖥 Sistem Gereksinimleri
-
-- Node.js v16+
-- FFmpeg (Sistemde yüklü olmalıdır, `run.bat` otomatik kontrol eder).
-- Discord Hesap Token'ları.
+**Adım 6:** Backend URL'i kopyala (örnek: `https://daveapp-backend-xyz.onrender.com`)
 
 ---
-*Geliştirici: Dave.903 Development Team*
-*Sürüm: v4.0.0 Stable Build 2024.1*
+
+### 2️⃣ FRONTEND (VERCEL) DEPLOY
+
+**Adım 1:** Vercel.com → "Add New Project"
+
+**Adım 2:** GitHub repo'yu import et
+
+**Adım 3:** Ayarlar:
+```
+Framework Preset: Vite
+Build Command: npm run build
+Output Directory: dist
+Root Directory: ./ (ana klasör)
+```
+
+**Adım 4:** Environment Variables ekle:
+```
+VITE_BACKEND_URL=https://daveapp-backend-xyz.onrender.com
+```
+(Render'dan kopyaladığın backend URL'i buraya yapıştır!)
+
+**Adım 5:** "Deploy" → Tamamlanana kadar bekle
+
+**Adım 6:** Frontend URL'i kopyala (örnek: `https://daveapp-delta.vercel.app`)
+
+---
+
+### 3️⃣ BACKEND'DE CORS GÜNCELLEMESİ (ÇOK ÖNEMLİ!)
+
+**Render'a geri dön:**
+
+1. Dashboard → daveapp-backend → Environment
+2. `ALLOWED_ORIGINS` değişkenini bul
+3. Frontend URL'ini ekle:
+   ```
+   https://daveapp-delta.vercel.app
+   ```
+4. "Save Changes"
+5. **Manuel Redeploy:** Settings → Manual Deploy → "Deploy latest commit"
+
+---
+
+## ✅ TEST
+
+1. `https://daveapp-delta.vercel.app` adresini aç
+2. Token/Sunucu/Ses bilgileri gir
+3. "Sistemi Başlat / Bağlan" butonuna bas
+4. Eğer backend bağlanamıyorsa tarayıcı Console'a bak (F12)
+
+---
+
+## 🐛 SORUN GİDERME
+
+### "Backend'e bağlanılamadı!"
+1. Render backend servisi çalışıyor mu? (dashboard'dan kontrol et)
+2. Vercel'de `VITE_BACKEND_URL` doğru mu?
+3. Render'da `ALLOWED_ORIGINS` doğru mu?
+4. Tarayıcı Console'da CORS hatası var mı?
+
+### "BAĞLANIYOR" ekranında takılı kalıyor
+- Bu hata düzeltildi! Instant bağlanıyor artık.
+- Eğer hala takılıyorsa backend çalışmıyor demektir.
+
+### Backend 15 dakika sonra kapanıyor
+- Render Free tier idle timeout'u var
+- Health check endpoint var (`/health`) ama bu sadece otomatik restart için
+- İlk istek 30 saniye gecikebilir (cold start)
+
+---
+
+## 📌 ÖNEMLİ NOTLAR
+
+- **Render Free tier:** 15 dakika idle sonrası sleep mode
+- **Vercel Free tier:** Her push otomatik deploy
+- **Environment Variables değiştirdiysen:** Hem Vercel hem Render'da redeploy gerekir
+- **CORS hatası:** `ALLOWED_ORIGINS` her iki URL'i de içermeli (frontend + localhost)
+
