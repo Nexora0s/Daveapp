@@ -52,15 +52,27 @@ function App() {
 
       const data = await response.json();
       if (response.ok) {
-        alert('✅ İşlem Tamamlandı: ' + data.message);
-        setToken('');
-        setTokens('');
-        setActivityText('');
-        setProxy('');
-        setServerId('');
-        setVoiceId('');
+        let resultMsg = `✅ İşlem Tamamlandı: ${data.message}`;
+        
+        if (data.failed && data.failed.length > 0) {
+          resultMsg += '\n\n❌ Başarısız olanlar:';
+          data.failed.forEach(f => {
+            resultMsg += `\n• ${f.token}: ${f.error}`;
+          });
+        }
+        
+        alert(resultMsg);
+        
+        if (data.success && data.success.length > 0) {
+          setToken('');
+          setTokens('');
+          setActivityText('');
+          setProxy('');
+          setServerId('');
+          setVoiceId('');
+        }
       } else {
-        alert('❌ Hata: ' + data.error);
+        alert('❌ Kritik Hata: ' + (data.error || 'Bilinmeyen bir hata oluştu.'));
       }
     } catch (err) {
       console.error('Backend connection error:', err);
