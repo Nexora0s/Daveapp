@@ -312,10 +312,10 @@ const Sidebar = ({ sessions = [], activeView = 'bot', setActiveView }) => {
         .status-dot-blink.red { background: #e74c3c; box-shadow: 0 0 8px #e74c3c; }
 
         .action-buttons { display: flex; gap: 8px; margin-top: 4px; }
-        .action-btn { flex: 1; height: 38px; display: grid; place-items: center; border-radius: 12px; color: var(--text-muted); background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
-        .action-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); transform: translateY(-1px); }
-        .action-btn.active { color: #000; background: var(--accent-gold); border-color: var(--accent-gold); box-shadow: 0 4px 12px rgba(243, 156, 18, 0.2); }
-        .action-btn.active svg { filter: drop-shadow(0 0 2px rgba(0,0,0,0.5)); }
+        .action-btn { flex: 1; height: 42px; display: grid; place-items: center; border-radius: 12px; color: rgba(255,255,255,0.4); background: #000; border: 1px solid rgba(255,255,255,0.05); transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
+        .action-btn:hover { background: #0a0a0a; border-color: rgba(255,255,255,0.1); transform: translateY(-1px); color: #fff; }
+        .action-btn.active { color: #000; background: #f39c12; border-color: #f39c12; box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4); }
+        .action-btn.active svg { filter: drop-shadow(0 0 1px rgba(0,0,0,0.3)); }
         
         .empty-message { color: var(--text-muted); font-size: 0.9rem; text-align: center; padding: 1.5rem; border: 1px dashed var(--card-border); border-radius: 12px; }
         
