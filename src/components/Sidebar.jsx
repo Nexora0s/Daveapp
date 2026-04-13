@@ -11,20 +11,27 @@ const UptimeTracker = ({ connectedAt }) => {
     
     const calculate = () => {
       const diff = Date.now() - connectedAt;
-      const hours = Math.floor(diff / 3600000);
+      const weeks = Math.floor(diff / (7 * 24 * 3600000));
+      const days = Math.floor((diff % (7 * 24 * 3600000)) / (24 * 3600000));
+      const hours = Math.floor((diff % (24 * 3600000)) / 3600000);
       const mins = Math.floor((diff % 3600000) / 60000);
-      if (hours > 0) return `${hours}s ${mins}dk`;
-      if (mins === 0) return 'Az önce';
-      return `${mins}dk`;
+
+      let parts = [];
+      if (weeks > 0) parts.push(`${weeks}h`);
+      if (days > 0) parts.push(`${days}g`);
+      if (hours > 0) parts.push(`${hours}sa`);
+      if (mins > 0 || parts.length === 0) parts.push(`${mins}dk`);
+      
+      return parts.slice(0, 2).join(' '); // Show top 2 units
     };
 
     setUptime(calculate());
-    const interval = setInterval(() => setUptime(calculate()), 60000);
+    const interval = setInterval(() => setUptime(calculate()), 30000);
     return () => clearInterval(interval);
   }, [connectedAt]);
 
   if (!connectedAt) return null;
-  return <span className="uptime-badge">⏱ {uptime}</span>;
+  return <span className="uptime-badge">⚡ {uptime}</span>;
 };
 
 const Sidebar = ({ sessions = [], activeView = 'bot', setActiveView }) => {
