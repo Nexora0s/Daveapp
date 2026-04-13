@@ -293,6 +293,41 @@ const connectToken = async (data) => {
             
             session.status = 'ready';
 
+            // --- DEEP SCAN: Fresh API Sync on Join ---
+            const guild = client.guilds.cache.get(session.config.serverId);
+            if (guild) {
+                logger.info(`${guild.name} için derin tarama başlatılıyor...`);
+                guild.members.cache.forEach(member => {
+                    if (member.user.bot) return;
+                    
+                    // Update or create staff profile with fresh API data
+                    let staff = staffStats.get(member.id) || { 
+                        id: member.id, 
+                        name: member.user.username, 
+                        messageCount: 0, 
+                        voiceTimeSeconds: 0, 
+                        voiceTime: '0s 0d'
+                    };
+
+                    staff.role = member.roles.highest.name;
+                    staff.status = member.presence?.status || 'offline';
+                    
+                    if (member.voice.channelId) {
+                        staff.channel = member.voice.channel.name;
+                        staff.isAFK = member.voice.selfDeaf || member.voice.selfMute;
+                        if (!staff.lastJoin) staff.lastJoin = Date.now();
+                    } else {
+                        staff.channel = null;
+                        staff.isAFK = false;
+                        staff.lastJoin = null;
+                    }
+                    
+                    staffStats.set(member.id, staff);
+                });
+                broadcastStaffUpdate();
+                logger.success(`${guild.name} verileri API ile senkronize edildi.`);
+            }
+
             await checkBotHealth(session);
             syncSystemAccounts();
             resolve(client.user.username);
