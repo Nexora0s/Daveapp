@@ -207,12 +207,22 @@ const checkBotHealth = async (session) => {
 const connectToken = async (data) => {
     const { token, serverId, voiceId, presence, media, activityText } = data;
 
-    // Check if duplicate
-    const existing = Array.from(activeSessions.values()).find(s => s.token === token);
-    if (existing) {
-        logger.info("Token zaten aktif, oturum yenileniyor...");
-        try { existing.client.destroy(); } catch(e) {}
-        activeSessions.delete(existing.client.user?.id);
+    // Check if session already exists by token
+    let session = Array.from(activeSessions.values()).find(s => s.token === token);
+    
+    if (session) {
+        logger.info("Token için oturum yenileniyor...");
+        try { session.client.destroy(); } catch(e) {}
+        session.status = 'connecting';
+    } else {
+        session = {
+            token,
+            isStreaming: false,
+            isSeste: false,
+            connectedAt: Date.now(),
+            status: 'connecting',
+            config: { serverId: serverId.trim(), voiceId: voiceId.trim(), presence, media, activityText }
+        };
     }
 
     const clientOptions = {
@@ -231,16 +241,10 @@ const connectToken = async (data) => {
     }
 
     const client = new Client(clientOptions);
-
-    const session = {
-        client,
-        token,
-        isStreaming: false,
-        isSeste: false,
-        connectedAt: Date.now(),
-        status: 'connecting',
-        config: { serverId: serverId.trim(), voiceId: voiceId.trim(), presence, media, activityText }
-    };
+    session.client = client;
+    
+    // Store with temporary key (token) so it shows up in UI immediately
+    activeSessions.set(token, session);
 
     return new Promise((resolve, reject) => {
         client.on('ready', async () => {
@@ -254,7 +258,10 @@ const connectToken = async (data) => {
             
             client.user.setPresence({ status: presence || 'online', activities: acts });
             
+            // Transition from token key to userId key
+            activeSessions.delete(token);
             activeSessions.set(client.user.id, session);
+            
             session.status = 'ready';
 
             await checkBotHealth(session);
