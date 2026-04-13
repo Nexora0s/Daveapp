@@ -166,15 +166,25 @@ const Sidebar = ({ sessions = [], activeView = 'bot', setActiveView }) => {
                       <UptimeTracker connectedAt={user.connectedAt} />
                     </h4>
                     <p className="status-text">
-                      {user.config?.cafeMode ? (
+                      {user.status === 'connecting' ? (
+                        <>
+                          <span className="status-dot-blink yellow"></span>
+                          Bağlanıyor...
+                        </>
+                      ) : user.status === 'disconnected' ? (
+                        <>
+                          <span className="status-dot-blink red"></span>
+                          Bağlantı Kesildi (Yenileniyor)
+                        </>
+                      ) : user.config?.cafeMode ? (
                         <>
                           <span className="cafe-dot-small"></span>
                           Kafe Kamera 24/7
                         </>
                       ) : (
                         <>
-                          <span className="live-dot-small"></span>
-                          {user.config?.media?.stream ? 'Yayında' : 'Seste Aktif'}
+                          <span className={`${user.status === 'streaming' ? 'live-dot-small' : 'seste-dot'}`}></span>
+                          {user.status === 'streaming' ? 'Yayında' : 'Seste Aktif'}
                         </>
                       )}
                     </p>
@@ -295,6 +305,11 @@ const Sidebar = ({ sessions = [], activeView = 'bot', setActiveView }) => {
 
         .live-dot-small { width: 6px; height: 6px; background: #2ecc71; border-radius: 50%; box-shadow: 0 0 8px #2ecc71; animation: pulse-blink 1.5s infinite; flex-shrink: 0; }
         @keyframes pulse-blink { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+
+        .seste-dot { width: 6px; height: 6px; background: #3498db; border-radius: 50%; box-shadow: 0 0 8px #3498db; flex-shrink: 0; }
+        .status-dot-blink { width: 6px; height: 6px; border-radius: 50%; animation: pulse-blink 1s infinite; flex-shrink: 0; }
+        .status-dot-blink.yellow { background: #f1c40f; box-shadow: 0 0 8px #f1c40f; }
+        .status-dot-blink.red { background: #e74c3c; box-shadow: 0 0 8px #e74c3c; }
 
         .action-buttons { display: flex; gap: 8px; margin-top: 4px; }
         .action-btn { flex: 1; height: 38px; display: grid; place-items: center; border-radius: 12px; color: var(--text-muted); background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
