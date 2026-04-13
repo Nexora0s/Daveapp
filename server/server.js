@@ -368,6 +368,20 @@ app.post('/api/connect', async (req, res) => {
     res.json({ message: "İşlem başlatıldı. Botlar sırayla bağlanıyor." });
 });
 
+app.post('/api/logout', (req, res) => {
+    const { userId } = req.body;
+    const session = activeSessions.get(userId);
+    if (session) {
+        try { session.client.destroy(); } catch(e) {}
+        activeSessions.delete(userId);
+        syncSystemAccounts();
+        logger.info(`${session.client.user?.username} oturumu kapatıldı.`);
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ error: "Oturum bulunamadı" });
+    }
+});
+
 app.post('/api/logout-all', (req, res) => {
     activeSessions.forEach(s => {
         try { s.client.destroy(); } catch(e) {}
@@ -375,6 +389,63 @@ app.post('/api/logout-all', (req, res) => {
     activeSessions.clear();
     syncSystemAccounts();
     logger.info("Tüm oturumlar kapatıldı.");
+    res.json({ success: true });
+});
+
+app.post('/api/update-media', async (req, res) => {
+    const { tokens, media } = req.body;
+    const tokenList = Array.isArray(tokens) ? tokens : [tokens];
+    
+    for (const t of tokenList) {
+        const session = Array.from(activeSessions.values()).find(s => s.token === t);
+        if (!session) continue;
+        
+        session.config.media = { ...session.config.media, ...media };
+        
+        // Apply changes to Discord
+        if (session.client.readyAt) {
+            const { serverId, voiceId } = session.config;
+            
+            // If camera/stream is enabled, ensure we are in a stream connection
+            if (session.config.media.camera || session.config.media.stream) {
+                await startStream(session, serverId, voiceId);
+            } else {
+                // Return to normal voice if was streaming
+                if (session.isStreaming) {
+                    try { session.streamer.stopVideo(); } catch(e) {}
+                    session.isStreaming = false;
+                }
+                
+                const guild = session.client.guilds.cache.get(serverId);
+                if (guild) {
+                    joinVoiceChannel({
+                        channelId: voiceId,
+                        guildId: serverId,
+                        adapterCreator: guild.voiceAdapterCreator,
+                        selfMute: !session.config.media.mic,
+                        selfDeaf: !session.config.media.sound
+                    });
+                }
+            }
+            
+            // Re-send status symbols (OP 4)
+            try {
+                session.client.ws.send({
+                    op: 4,
+                    d: {
+                        guild_id: serverId,
+                        channel_id: voiceId,
+                        self_mute: !session.config.media.mic,
+                        self_deaf: !session.config.media.sound,
+                        self_video: !!session.config.media.camera,
+                        self_stream: !!session.config.media.stream
+                    }
+                });
+            } catch (err) {}
+        }
+    }
+    
+    syncSystemAccounts();
     res.json({ success: true });
 });
 
