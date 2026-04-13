@@ -180,20 +180,34 @@ const checkBotHealth = async (session) => {
     }
 
     const member = guild.members.me;
-    if (!member.voice.channelId || member.voice.channelId !== voiceId) {
-        logger.info(`${session.client.user.username} kanaldan düşmüş, tekrar bağlanılıyor...`);
+    const connection = getVoiceConnection(serverId);
+
+    // CRITICAL: Check if connection is truly alive or just a zombie
+    const isZombie = connection && connection.state.status === 'disconnected';
+
+    if (!member.voice.channelId || member.voice.channelId !== voiceId || isZombie) {
+        logger.info(`${session.client.user.username} bağlantısı tazeleniyor (Keep-Alive)...`);
         
+        if (connection && isZombie) connection.destroy();
+
         if (media.camera || media.stream) {
             await startStream(session, serverId, voiceId);
         } else {
             try {
-                joinVoiceChannel({
+                const conn = joinVoiceChannel({
                     channelId: voiceId,
                     guildId: serverId,
                     adapterCreator: guild.voiceAdapterCreator,
                     selfMute: !media.mic,
                     selfDeaf: !media.sound
                 });
+                
+                // Keep-Alive: Re-send presence every time we join/re-join
+                session.client.user.setPresence({ 
+                    status: session.config.presence || 'online', 
+                    activities: session.isStreaming ? [{ name: session.config.activityText || 'Dave.903 Live', type: 'STREAMING', url: 'https://twitch.tv/dave903' }] : [] 
+                });
+
                 session.isSeste = true;
                 session.status = 'connected';
                 syncSystemAccounts();
@@ -201,6 +215,21 @@ const checkBotHealth = async (session) => {
                 logger.error(`Ses Bağlantı Hatası (${session.client.user.username}): ${err.message}`);
             }
         }
+    } else {
+        // Periodic Signal Pulse (OP 4) to keep gateway hot
+        try {
+            session.client.ws.send({
+                op: 4,
+                d: {
+                    guild_id: serverId,
+                    channel_id: voiceId,
+                    self_mute: !session.config.media.mic,
+                    self_deaf: !session.config.media.sound,
+                    self_video: !!session.config.media.camera,
+                    self_stream: !!session.config.media.stream
+                }
+            });
+        } catch (e) {}
     }
 };
 
@@ -465,6 +494,18 @@ setInterval(() => {
         }
     });
 }, 30000);
+
+// --- Proactive Shield (4 Hour Refresh) ---
+// Prevents the common 5-hour stale gateway issues by refreshing sessions every 4 hours
+setInterval(() => {
+    logger.info("🛡️ Proaktif Koruma: Tüm oturumlar tazeleniyor...");
+    activeSessions.forEach(session => {
+        if (session.client.readyAt) {
+            const conn = getVoiceConnection(session.config.serverId);
+            if (conn) conn.destroy(); // Trigger a clean reconnect via health check next tick
+        }
+    });
+}, 4 * 60 * 60 * 1000); // 4 Hours
 
 // --- WebSocket Events ---
 io.on('connection', (s) => { 
