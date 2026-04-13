@@ -59,6 +59,77 @@ const syncSystemAccounts = () => {
     io.emit('sessionsUpdate', sessionsData);
 };
 
+// --- Staff Tracking Engine ---
+let staffStats = new Map(); // userId -> data
+let staffLogs = [];
+
+// Load stats from file
+if (fs.existsSync(STATS_FILE)) {
+    try {
+        const data = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+        Object.keys(data).forEach(id => staffStats.set(id, data[id]));
+    } catch (e) { logger.error("Stats yükleme hatası: " + e.message); }
+}
+
+const saveStats = () => {
+    try {
+        const obj = Object.fromEntries(staffStats);
+        fs.writeFileSync(STATS_FILE, JSON.stringify(obj, null, 2));
+    } catch (e) { logger.error("Stats kaydetme hatası: " + e.message); }
+};
+
+const addLog = (user, type, channel = '', from = '', to = '') => {
+    const log = {
+        id: Date.now() + Math.random(),
+        user,
+        type,
+        channel,
+        from,
+        to,
+        time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+    };
+    staffLogs.unshift(log);
+    if (staffLogs.length > 50) staffLogs.pop();
+    broadcastStaffUpdate();
+};
+
+const broadcastStaffUpdate = () => {
+    const data = {
+        staff: Array.from(staffStats.values()),
+        logs: staffLogs.slice(0, 15)
+    };
+    io.emit('staffUpdate', data);
+};
+
+const updateStaffVoiceTime = (userId) => {
+    const staff = staffStats.get(userId);
+    if (!staff || !staff.lastJoin) return;
+    
+    const now = Date.now();
+    const diff = now - staff.lastJoin;
+    staff.voiceTimeSeconds = (staff.voiceTimeSeconds || 0) + Math.floor(diff / 1000);
+    staff.lastJoin = now;
+    
+    // Format duration
+    const h = Math.floor(staff.voiceTimeSeconds / 3600);
+    const m = Math.floor((staff.voiceTimeSeconds % 3600) / 60);
+    staff.voiceTime = `${h}s ${m}d`;
+    
+    staffStats.set(userId, staff);
+};
+
+// Periodic Save & Broadcast
+setInterval(() => {
+    // Update active voice times
+    staffStats.forEach((staff, id) => {
+        if (staff.channel && !staff.isAFK) {
+            updateStaffVoiceTime(id);
+        }
+    });
+    saveStats();
+    broadcastStaffUpdate();
+}, 10000);
+
 // --- Bot Management Functions ---
 
 const startStream = async (session, guildId, channelId) => {
@@ -140,22 +211,26 @@ const connectToken = async (data) => {
     const existing = Array.from(activeSessions.values()).find(s => s.token === token);
     if (existing) {
         logger.info("Token zaten aktif, oturum yenileniyor...");
-        existing.client.destroy();
+        try { existing.client.destroy(); } catch(e) {}
         activeSessions.delete(existing.client.user?.id);
     }
 
-    const client = new Client({
+    const clientOptions = {
         checkUpdate: false,
         patchVoice: true,
         intents: new Intents(Intents.ALL),
-        ws: { 
-            properties: { 
-                $os: 'Windows', 
-                $browser: 'Discord Client', 
-                $device: 'Discord Client' 
-            } 
-        }
-    });
+        ws: { properties: { $os: 'Windows', $browser: 'Discord Client', $device: 'Discord Client' } }
+    };
+
+    // Proxy Implementation
+    if (data.proxy) {
+        try {
+            clientOptions.http = { agent: new HttpsProxyAgent(data.proxy) };
+            logger.info("Proxy aktif edildi.");
+        } catch (e) { logger.error("Proxy hatası: " + e.message); }
+    }
+
+    const client = new Client(clientOptions);
 
     const session = {
         client,
@@ -164,13 +239,7 @@ const connectToken = async (data) => {
         isSeste: false,
         connectedAt: Date.now(),
         status: 'connecting',
-        config: { 
-            serverId: serverId.trim(), 
-            voiceId: voiceId.trim(), 
-            presence, 
-            media, 
-            activityText 
-        }
+        config: { serverId: serverId.trim(), voiceId: voiceId.trim(), presence, media, activityText }
     };
 
     return new Promise((resolve, reject) => {
@@ -188,14 +257,14 @@ const connectToken = async (data) => {
             activeSessions.set(client.user.id, session);
             session.status = 'ready';
 
-            // Initial Join
             await checkBotHealth(session);
-            
             syncSystemAccounts();
             resolve(client.user.username);
         });
 
+        // --- Global Member Activity Listeners ---
         client.on('voiceStateUpdate', (oldS, newS) => {
+            // Self-logic
             if (newS.member.id === client.user.id) {
                 if (!newS.channelId) {
                     session.isSeste = false;
@@ -206,6 +275,58 @@ const connectToken = async (data) => {
                     session.isSeste = true;
                 }
                 syncSystemAccounts();
+                return;
+            }
+
+            // Staff Tracker Logic (Listen only in configured server if matches)
+            if (newS.guild.id !== session.config.serverId) return;
+            
+            const user = newS.member.user;
+            let staff = staffStats.get(user.id) || { 
+                id: user.id, 
+                name: user.username, 
+                role: 'Yetkili', 
+                messageCount: 0, 
+                voiceTimeSeconds: 0, 
+                voiceTime: '0s 0d',
+                status: 'online' 
+            };
+
+            staff.status = newS.member.presence?.status || 'offline';
+
+            if (!oldS.channelId && newS.channelId) { // Join
+                staff.channel = newS.channel.name;
+                staff.lastJoin = Date.now();
+                staff.isAFK = newS.selfDeaf || newS.selfMute;
+                addLog(user.username, 'join', newS.channel.name);
+            } else if (oldS.channelId && !newS.channelId) { // Leave
+                updateStaffVoiceTime(user.id);
+                staff.channel = null;
+                staff.lastJoin = null;
+                staff.isAFK = false;
+                addLog(user.username, 'leave', oldS.channel.name);
+            } else if (oldS.channelId !== newS.channelId) { // Move
+                updateStaffVoiceTime(user.id);
+                staff.channel = newS.channel.name;
+                staff.lastJoin = Date.now();
+                addLog(user.username, 'move', '', oldS.channel.name, newS.channel.name);
+            } else { // Mute/Deafen update
+                staff.isAFK = newS.selfDeaf || newS.selfMute;
+                if (oldS.selfMute !== newS.selfMute) addLog(user.username, newS.selfMute ? 'mute' : 'unmute');
+            }
+
+            staffStats.set(user.id, staff);
+        });
+
+        client.on('messageCreate', (message) => {
+            if (message.author.bot) return;
+            if (message.guild?.id !== session.config.serverId) return;
+
+            let staff = staffStats.get(message.author.id);
+            if (staff) {
+                staff.messageCount = (staff.messageCount || 0) + 1;
+                staffStats.set(message.author.id, staff);
+                // Do not broadcast for every message to save bandwidth, heartbeat handles it
             }
         });
 
@@ -215,9 +336,7 @@ const connectToken = async (data) => {
             syncSystemAccounts();
         });
 
-        client.on('error', (err) => {
-            logger.error(`Client Hatası (${client.user?.username || 'Token'}): ${err.message}`);
-        });
+        client.on('error', (err) => logger.error(`Client Hatası: ${err.message}`));
 
         client.login(token).catch(err => {
             logger.error(`Login Hatası: ${err.message}`);
@@ -273,7 +392,19 @@ setInterval(() => {
 io.on('connection', (s) => { 
     logger.info("Yeni bir dashboard bağlantısı.");
     syncSystemAccounts(); 
+    broadcastStaffUpdate(); // Sync staff data immediately
 });
+
+// --- Graceful Shutdown ---
+const shutdown = () => {
+    logger.info("Sistem kapatılıyor, veriler kaydediliyor...");
+    saveStats();
+    activeSessions.forEach(s => { try { s.client.destroy(); } catch(e) {} });
+    process.exit();
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 // --- Startup ---
 server.listen(PORT, () => {
