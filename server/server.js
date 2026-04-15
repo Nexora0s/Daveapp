@@ -50,6 +50,10 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json());
 
+// --- Health Check & Ping for Uptime Services ---
+app.get('/ping', (req, res) => res.status(200).send('pong'));
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok', uptime: process.uptime() }));
+
 const syncSystemAccounts = () => {
     const sessionsData = Array.from(activeSessions.values()).map((session) => ({
         id: session.client.user?.id,
@@ -188,15 +192,29 @@ const checkBotHealth = async (session) => {
     const member = guild.members.me;
     const connection = getVoiceConnection(serverId);
 
-    // CRITICAL: Check if connection is truly alive or just a zombie
-    const isZombie = connection && connection.state.status === 'disconnected';
+    // CRITICAL: Check Gateway Status (Socket connection)
+    if (session.client.ws.status !== 0) { // 0 = READY
+        logger.warn(`⚠️ Gateway Bağlantısı Kopuk (${session.client.user?.username}). Yeniden giriş yapılıyor...`);
+        try { session.client.destroy(); } catch(e) {}
+        await connectToken({ ...session.config, token: session.token });
+        return;
+    }
 
-    if (!member.voice.channelId || member.voice.channelId !== voiceId || isZombie) {
+    // CRITICAL: Check if connection is truly alive or just a zombie
+    const isZombie = connection && (connection.state.status === 'disconnected' || connection.state.status === 'destroyed');
+
+    if (!member || !member.voice.channelId || member.voice.channelId !== voiceId || isZombie) {
         logger.info(`${session.client.user.username} bağlantısı tazeleniyor (Keep-Alive)...`);
         
-        if (connection && isZombie) connection.destroy();
+        if (connection) {
+            try { connection.destroy(); } catch(e) {}
+        }
 
         if (media.camera || media.stream) {
+            // Kill previous streamer if exists to prevent process leaks
+            if (session.streamer) {
+                try { session.streamer.stopVideo(); } catch(e) {}
+            }
             await startStream(session, serverId, voiceId);
         } else {
             try {
@@ -249,15 +267,23 @@ const checkBotHealth = async (session) => {
 // --- Professional Keep-Alive (The Anti-Cloud-Sleep System) ---
 const keepAlive = (url) => {
     if (!url) return;
+    
+    // Ensure URL has protocol
+    let target = url;
+    if (!target.startsWith('http')) {
+        target = `https://${target}`;
+    }
+
+    logger.info(`🌐 Keep-Alive başlatıldı: ${target} (Her 5 dakikada bir)`);
+
     setInterval(() => {
-        https.get(url, (res) => {
-            if (res.statusCode === 200) {
-                logger.success(`Keep-Alive: Sistem sıcak tutuluyor... (${res.statusCode})`);
-            }
+        const protocol = target.startsWith('https') ? https : require('http');
+        protocol.get(target, (res) => {
+            logger.success(`💓 Keep-Alive Pulsing: Sistem Aktif (${res.statusCode})`);
         }).on('error', (err) => {
-            logger.error(`Keep-Alive Hatası: ${err.message}`);
+            logger.error(`❌ Keep-Alive Hatası: ${err.message}`);
         });
-    }, 10 * 60 * 1000); // Every 10 minutes
+    }, 5 * 60 * 1000); // 5 Minutes (More aggressive)
 };
 
 // --- Proxy Best Practice Check ---
@@ -571,14 +597,14 @@ app.post('/api/update-media', async (req, res) => {
 });
 
 // --- Maintenance Loop (The Heartbeat) ---
-// Checks every 30 seconds if any bot is out of its designated channel
+// Checks every 20 seconds for maximum stability
 setInterval(() => {
     activeSessions.forEach(session => {
-        if (session.client.readyAt) {
+        if (session.client && session.client.readyAt) {
             checkBotHealth(session);
         }
     });
-}, 30000);
+}, 20000); // 20 seconds
 
 // --- Proactive Shield (4 Hour Refresh) ---
 // Prevents the common 5-hour stale gateway issues by refreshing sessions every 4 hours
