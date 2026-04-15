@@ -10,6 +10,12 @@ const ffmpeg = require('@ffmpeg-installer/ffmpeg');
 const { Streamer } = require('@dank074/discord-video-stream');
 const helmet = require('helmet');
 const fs = require('fs');
+const https = require('https'); // Added for self-ping logic
+
+// --- Professional Constants ---
+const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; // Render automatically provides this
+const VERCEL_URL = process.env.VERCEL_URL;
+const BASE_URL = RENDER_EXTERNAL_URL || VERCEL_URL || `http://localhost:${PORT}`;
 
 // --- Configuration & Paths ---
 const STATS_FILE = path.join(__dirname, 'data', 'staff_stats.json');
@@ -229,7 +235,36 @@ const checkBotHealth = async (session) => {
                     self_stream: !!session.config.media.stream
                 }
             });
-        } catch (e) {}
+            // Update presence periodically to stay active
+            session.client.user.setPresence({ 
+                status: session.config.presence || 'online', 
+                activities: session.isStreaming ? [{ name: session.config.activityText || 'Dave.903 Live', type: 'STREAMING', url: 'https://twitch.tv/dave903' }] : [] 
+            });
+        } catch (e) {
+            logger.warn(`Pulse hatası (${session.client.user?.username}): ${e.message}`);
+        }
+    }
+};
+
+// --- Professional Keep-Alive (The Anti-Cloud-Sleep System) ---
+const keepAlive = (url) => {
+    if (!url) return;
+    setInterval(() => {
+        https.get(url, (res) => {
+            if (res.statusCode === 200) {
+                logger.success(`Keep-Alive: Sistem sıcak tutuluyor... (${res.statusCode})`);
+            }
+        }).on('error', (err) => {
+            logger.error(`Keep-Alive Hatası: ${err.message}`);
+        });
+    }, 10 * 60 * 1000); // Every 10 minutes
+};
+
+// --- Proxy Best Practice Check ---
+const validateEnvironment = () => {
+    if (RENDER_EXTERNAL_URL || VERCEL_URL) {
+        logger.warn("⚠️ BULUT ORTAMI TESPİT EDİLDİ: Vercel/Render üzerinde proxy olmadan selfbot çalıştırmak tokenlerin düşmesine (hesap kapanmasına) neden olabilir.");
+        logger.info("💡 Profesyonel Tavsiye: Her token için ayrı bir 'Residential Proxy' kullanın.");
     }
 };
 
@@ -407,10 +442,25 @@ const connectToken = async (data) => {
             syncSystemAccounts();
         });
 
-        client.on('error', (err) => logger.error(`Client Hatası: ${err.message}`));
+        client.on('rateLimit', (data) => {
+            logger.warn(`🛑 Hız Sınırı (Rate Limit): ${client.user?.username} - ${data.timeout}ms bekletiliyor.`);
+        });
+
+        client.on('error', (err) => {
+            logger.error(`❌ Kritik Hata (${client.user?.username || 'Bilinmeyen'}): ${err.message}`);
+            if (err.message.includes('401: Unauthorized') || err.message.includes('TOKEN_INVALID')) {
+                logger.error(`⚠️ TOKEN DÜŞTÜ: ${token.substring(0, 10)}... artık geçersiz.`);
+                session.status = 'token_invalid';
+                syncSystemAccounts();
+            }
+        });
 
         client.login(token).catch(err => {
             logger.error(`Login Hatası: ${err.message}`);
+            if (err.message.includes('TOKEN_INVALID')) {
+                session.status = 'token_invalid';
+                syncSystemAccounts();
+            }
             reject(err);
         });
     });
@@ -561,8 +611,6 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 // --- Startup ---
-server.listen(PORT, () => {
-    console.clear();
     console.log(`
     \x1b[35m██████╗  █████╗ ██╗   ██╗███████╗    █████╗ ██████╗ ██████╗ 
     ██╔══██╗██╔══██╗██║   ██║██╔════╝   ██╔══██╗██╔══██╗██╔══██╗
@@ -575,6 +623,13 @@ server.listen(PORT, () => {
     🌐 Port: \x1b[36m${PORT}\x1b[0m
     🛡️ Koruma: \x1b[36mAktif\x1b[0m
     📊 Monitoring: \x1b[36mAktif (30s Heartsbeat)\x1b[0m
+    🔗 URL: \x1b[36m${BASE_URL}\x1b[0m
     `);
+
+    // Initialize Professional Modules
+    validateEnvironment();
+    if (RENDER_EXTERNAL_URL || VERCEL_URL) {
+        keepAlive(BASE_URL);
+    }
 });
 
