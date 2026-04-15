@@ -35,11 +35,40 @@ const RECONNECT_DELAY = 5000; // 5 seconds
 
 // --- Utils ---
 const logger = {
-    info: (msg) => console.log(`[\x1b[34mINFO\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`),
-    warn: (msg) => console.warn(`[\x1b[33mWARN\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`),
-    error: (msg) => console.error(`[\x1b[31mERROR\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`),
-    success: (msg) => console.log(`[\x1b[32mSUCCESS\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`)
+    info: (msg) => {
+        console.log(`[\x1b[34mINFO\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
+        this.logToFile(`INFO: ${msg}`);
+    },
+    warn: (msg) => {
+        console.warn(`[\x1b[33mWARN\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
+        this.logToFile(`WARN: ${msg}`);
+    },
+    error: (msg) => {
+        console.error(`[\x1b[31mERROR\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
+        this.logToFile(`ERROR: ${msg}`);
+    },
+    success: (msg) => {
+        console.log(`[\x1b[32mSUCCESS\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
+        this.logToFile(`SUCCESS: ${msg}`);
+    },
+    logToFile: (msg) => {
+        try {
+            const logLine = `[${new Date().toISOString()}] ${msg}\n`;
+            fs.appendFileSync(path.join(__dirname, 'data', 'error.log'), logLine);
+        } catch (e) {}
+    }
 };
+
+// --- Global Crash Guard ---
+process.on('uncaughtException', (err) => {
+    logger.error(`Kritik Çökme Engellendi: ${err.message}`);
+    logger.logToFile(`UNCAUGHT EXCEPTION: ${err.stack}`);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error(`Promise Reddedildi: ${reason}`);
+    logger.logToFile(`UNHANDLED REJECTION: ${reason}`);
+});
 
 // --- Core Web Server ---
 const app = express();
@@ -173,72 +202,66 @@ const startStream = async (session, guildId, channelId) => {
     } catch (e) { 
         logger.error(`Yayın Hatası (${session.client.user?.username}): ${e.message}`);
         session.isStreaming = false;
+        session.isProcessing = false;
         // Schedule retry
-        setTimeout(() => checkBotHealth(session), 10000);
+        setTimeout(() => checkBotHealth(session), 15000);
     }
 };
 
 const checkBotHealth = async (session) => {
-    if (!session.client.user) return;
+    if (!session.client.user || session.isProcessing) return;
 
     const { serverId, voiceId, media } = session.config;
     const guild = session.client.guilds.cache.get(serverId);
     
-    if (!guild) {
-        logger.warn(`${session.client.user.username} için sunucu bulunamadı.`);
-        return;
-    }
+    if (!guild) return;
 
     const member = guild.members.me;
     const connection = getVoiceConnection(serverId);
 
     // CRITICAL: Check Gateway Status (Socket connection)
-    if (session.client.ws.status !== 0) { // 0 = READY
-        logger.warn(`⚠️ Gateway Bağlantısı Kopuk (${session.client.user?.username}). Yeniden giriş yapılıyor...`);
+    if (session.client.ws.status !== 0) { 
+        session.isProcessing = true;
+        logger.warn(`⚠️ Gateway Kopuk (${session.client.user?.username})...`);
         try { session.client.destroy(); } catch(e) {}
-        await connectToken({ ...session.config, token: session.token });
+        setTimeout(() => {
+            session.isProcessing = false;
+            connectToken({ ...session.config, token: session.token });
+        }, 5000);
         return;
     }
 
-    // CRITICAL: Check if connection is truly alive or just a zombie
     const isZombie = connection && (connection.state.status === 'disconnected' || connection.state.status === 'destroyed');
 
     if (!member || !member.voice.channelId || member.voice.channelId !== voiceId || isZombie) {
-        logger.info(`${session.client.user.username} bağlantısı tazeleniyor (Keep-Alive)...`);
+        session.isProcessing = true;
+        logger.info(`${session.client.user.username} bağlantısı yenileniyor...`);
         
-        if (connection) {
-            try { connection.destroy(); } catch(e) {}
-        }
+        try {
+            if (connection) connection.destroy();
+            if (session.streamer) session.streamer.stopVideo();
+        } catch (e) {}
 
         if (media.camera || media.stream) {
-            // Kill previous streamer if exists to prevent process leaks
-            if (session.streamer) {
-                try { session.streamer.stopVideo(); } catch(e) {}
-            }
             await startStream(session, serverId, voiceId);
         } else {
             try {
-                const conn = joinVoiceChannel({
+                joinVoiceChannel({
                     channelId: voiceId,
                     guildId: serverId,
                     adapterCreator: guild.voiceAdapterCreator,
                     selfMute: !media.mic,
                     selfDeaf: !media.sound
                 });
-                
-                // Keep-Alive: Re-send presence every time we join/re-join
-                session.client.user.setPresence({ 
-                    status: session.config.presence || 'online', 
-                    activities: session.isStreaming ? [{ name: session.config.activityText || 'Dave.903 Live', type: 'STREAMING', url: 'https://twitch.tv/dave903' }] : [] 
-                });
-
                 session.isSeste = true;
                 session.status = 'connected';
                 syncSystemAccounts();
             } catch (err) {
-                logger.error(`Ses Bağlantı Hatası (${session.client.user.username}): ${err.message}`);
+                logger.error(`Ses Hatası: ${err.message}`);
             }
         }
+        
+        setTimeout(() => { session.isProcessing = false; }, 10000);
     } else {
         // Periodic Signal Pulse (OP 4) to keep gateway hot
         try {
