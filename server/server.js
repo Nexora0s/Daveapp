@@ -12,16 +12,16 @@ const helmet = require('helmet');
 const fs = require('fs');
 const https = require('https'); // Added for self-ping logic
 
-// --- Professional Constants ---
-const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL; // Render automatically provides this
-const VERCEL_URL = process.env.VERCEL_URL;
-const BASE_URL = RENDER_EXTERNAL_URL || VERCEL_URL || `http://localhost:${PORT}`;
-
 // --- Configuration & Paths ---
+const PORT = process.env.PORT || 3001;
 const STATS_FILE = path.join(__dirname, 'data', 'staff_stats.json');
 const BANNER_PATH = path.join(__dirname, 'assets', 'stream_banner.png');
 const CAFE_STATIC_PATH = path.join(__dirname, 'assets', 'cafe_static.png');
-const PORT = process.env.PORT || 3001;
+
+// --- Professional Constants ---
+const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL;
+const VERCEL_URL = process.env.VERCEL_URL;
+const BASE_URL = RENDER_EXTERNAL_URL || VERCEL_URL || `http://localhost:${PORT}`;
 
 if (!fs.existsSync(path.join(__dirname, 'data'))) {
     fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
@@ -37,19 +37,19 @@ const RECONNECT_DELAY = 5000; // 5 seconds
 const logger = {
     info: (msg) => {
         console.log(`[\x1b[34mINFO\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
-        this.logToFile(`INFO: ${msg}`);
+        logger.logToFile(`INFO: ${msg}`);
     },
     warn: (msg) => {
         console.warn(`[\x1b[33mWARN\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
-        this.logToFile(`WARN: ${msg}`);
+        logger.logToFile(`WARN: ${msg}`);
     },
     error: (msg) => {
         console.error(`[\x1b[31mERROR\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
-        this.logToFile(`ERROR: ${msg}`);
+        logger.logToFile(`ERROR: ${msg}`);
     },
     success: (msg) => {
         console.log(`[\x1b[32mSUCCESS\x1b[0m] ${new Date().toLocaleTimeString()} - ${msg}`);
-        this.logToFile(`SUCCESS: ${msg}`);
+        logger.logToFile(`SUCCESS: ${msg}`);
     },
     logToFile: (msg) => {
         try {
